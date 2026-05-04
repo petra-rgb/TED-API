@@ -4,24 +4,27 @@ import os
 
 st.set_page_config(page_title="TED Intelligence", layout="wide")
 
-FILE = "ted_tenders.xlsx"
-
 st.title("📊 TED Tender Intelligence")
 
-# Check if file exists
+FILE = "ted_tenders.xlsx"
+
 if not os.path.exists(FILE):
-    st.warning("No data yet — wait for GitHub Action to run.")
+    st.error("ted_tenders.xlsx not found")
     st.stop()
 
-# Load data
-live = pd.read_excel(FILE, sheet_name="Live Opportunities")
-intel = pd.read_excel(FILE, sheet_name="Market Intelligence")
+xls = pd.ExcelFile(FILE)
+st.caption(f"Available sheets: {', '.join(xls.sheet_names)}")
 
-# Tabs
-tab1, tab2 = st.tabs(["🟢 Live Opportunities", "📊 Market Intelligence"])
-
-with tab1:
+if "Live Opportunities" in xls.sheet_names:
+    live = pd.read_excel(FILE, sheet_name="Live Opportunities")
+    st.subheader("🟢 Live Opportunities")
     st.dataframe(live, use_container_width=True)
+else:
+    st.warning("No Live Opportunities sheet found.")
 
-with tab2:
+if "Market Intelligence" in xls.sheet_names:
+    intel = pd.read_excel(FILE, sheet_name="Market Intelligence")
+    st.subheader("📊 Market Intelligence")
     st.dataframe(intel, use_container_width=True)
+else:
+    st.info("No Market Intelligence results in this run.")
