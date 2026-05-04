@@ -11,6 +11,10 @@ env:
 jobs:
   fetch:
     runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
     steps:
       - uses: actions/checkout@v4
 
@@ -23,6 +27,14 @@ jobs:
 
       - name: Run TED fetch
         run: python ted_intelligence.py
+
+      - name: Commit Excel to repo
+        run: |
+          git config --global user.name "github-actions"
+          git config --global user.email "actions@github.com"
+          git add ted_tenders.xlsx
+          git commit -m "update TED data" || echo "no changes"
+          git push
 
       - name: Upload Excel output
         uses: actions/upload-artifact@v4
