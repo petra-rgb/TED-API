@@ -1,428 +1,376 @@
-{
- "cells": [
-  {
-   "cell_type": "code",
-   "execution_count": null,
-   "id": "168cfafb-ca4c-40cc-92a5-c5101f1866f4",
-   "metadata": {},
-   "outputs": [],
-   "source": [
-    "\"\"\"\n",
-    "TED Tender Intelligence \n",
-    "========================================\n",
-    "Daily runner: fetches notices published in the last 24 hours,\n",
-    "scores them against the profile, exports to Excel.\n",
-    "\n",
-    "USAGE:\n",
-    "    # In Jupyter (one-off):\n",
-    "    exec(open(\"ted_intelligence.py\").read())\n",
-    "    live, intel = fetch()\n",
-    "    export(live, intel)\n",
-    "\n",
-    "    # As a script (called by GitHub Actions daily):\n",
-    "    python ted_intelligence.py\n",
-    "\"\"\"\n",
-    "\n",
-    "import requests, re, time, os\n",
-    "import pandas as pd\n",
-    "from datetime import datetime, timedelta, timezone\n",
-    "from concurrent.futures import ThreadPoolExecutor, as_completed\n",
-    "\n",
-    "# ═══════════════════════════════════════════════════════════════\n",
-    "# CONFIGURATION\n",
-    "# ═══════════════════════════════════════════════════════════════\n",
-    "\n",
-    "# How far back to look. Default = 1 day for the daily runner.\n",
-    "# Set to 90 for a full backfill when running manually.\n",
-    "DAYS_BACK        = int(os.environ.get(\"DAYS_BACK\", \"1\"))\n",
-    "\n",
-    "PAGE_SIZE        = 250\n",
-    "MAX_PAGES        = 999\n",
-    "MIN_SCORE        = 3\n",
-    "AI_MAX_NOTICES   = 50\n",
-    "AI_WORKERS       = 4\n",
-    "\n",
-    "TODAY            = datetime.now(timezone.utc)\n",
-    "DEADLINE_CUTOFF  = TODAY - timedelta(hours=24)\n",
-    "\n",
-    "SEARCH_URL   = \"https://api.ted.europa.eu/v3/notices/search\"\n",
-    "CLAUDE_URL   = \"https://api.anthropic.com/v1/messages\"\n",
-    "CLAUDE_MODEL = \"claude-sonnet-4-20250514\"\n",
-    "\n",
-    "# Anthropic API key — set as env var in GitHub Actions / Streamlit secrets\n",
-    "# Or paste directly here for local use\n",
-    "ANTHROPIC_API_KEY = os.environ.get(\"ANTHROPIC_API_KEY\", \"\")\n",
-    "\n",
-    "RESPONSE_FIELDS = [\n",
-    "    \"publication-number\",\n",
-    "    \"notice-title\",\n",
-    "    \"buyer-name\",\n",
-    "    \"notice-type\",\n",
-    "    \"BT-13(t)-Part\",\n",
-    "]\n",
-    "\n",
-    "# ── Broad search terms (cast wide net, score locally) ────────────\n",
-    "BROAD_SEARCH_TERMS = [\n",
-    "    \"innovation\", \"commercialisation\", \"valorisation\",\n",
-    "    \"technology transfer\", \"advisory\", \"market study\",\n",
-    "    \"consultancy\", \"knowledge transfer\", \"exploitation\",\n",
-    "    \"research\", \"startup\", \"deep tech\",\n",
-    "    \"horizon europe\", \"dissemination\",\n",
-    "]\n",
-    "\n",
-    "# ── Tier 1: DM core language — +7 per hit ────────────────────────\n",
-    "TIER1 = [\n",
-    "    \"technology valorisation\", \"tech valorisation\",\n",
-    "    \"technology commercialisation\", \"tech commercialisation\",\n",
-    "    \"exploitation of results\", \"exploitation and dissemination\",\n",
-    "    \"dissemination and exploitation\",\n",
-    "    \"commercialisation of research\", \"commercialisation of innovation\",\n",
-    "    \"knowledge transfer\", \"technology transfer\",\n",
-    "    \"research to market\", \"research commercialisation\",\n",
-    "    \"ip commercialisation\", \"ip to market\",\n",
-    "    \"market uptake\", \"market adoption\",\n",
-    "    \"eic accelerator\", \"eic business acceleration\",\n",
-    "    \"eic bas\", \"business acceleration service\",\n",
-    "    \"horizon europe\", \"horizon 2020\",\n",
-    "    \"eurostars\", \"eureka cluster\",\n",
-    "    \"eit digital\", \"eit manufacturing\", \"eit health\",\n",
-    "    \"eit urban mobility\", \"eit food\", \"eit rawmaterials\",\n",
-    "    \"diana programme\", \"diana accelerator\",\n",
-    "    \"nato innovation\", \"defence innovation accelerator\",\n",
-    "    \"venture building\", \"venture creation\", \"venture support\",\n",
-    "    \"startup support\", \"startup acceleration\",\n",
-    "    \"deeptech\", \"deep tech\",\n",
-    "    \"spin-off\", \"spin-out\", \"spinout\",\n",
-    "    \"investor readiness\", \"investment readiness\",\n",
-    "    \"pre-commercial procurement\", \"innovation partnership\",\n",
-    "    \"innovation ecosystem\", \"ecosystem orchestration\",\n",
-    "    \"consortium commercialisation\", \"project commercialisation\",\n",
-    "    \"innovation management support\", \"innovation support services\",\n",
-    "    \"scale-up support\", \"scaleup support\",\n",
-    "    \"product-market fit\", \"market validation\",\n",
-    "    \"dual-use technology\", \"dual use technology\",\n",
-    "]\n",
-    "\n",
-    "# ── Tier 2: Contextual terms — +3 per hit ────────────────────────\n",
-    "TIER2 = [\n",
-    "    \"commercialisation\", \"valorisation\", \"go-to-market\",\n",
-    "    \"market intelligence\", \"market study\", \"market analysis\",\n",
-    "    \"competitive analysis\", \"landscape analysis\",\n",
-    "    \"technology assessment\", \"feasibility study\",\n",
-    "    \"business model\", \"value proposition\",\n",
-    "    \"stakeholder mapping\", \"ecosystem mapping\",\n",
-    "    \"advisory services\", \"strategic advisory\",\n",
-    "    \"fundraising support\", \"funding strategy\",\n",
-    "    \"regulatory strategy\", \"regulatory navigation\",\n",
-    "    \"market entry\", \"market access\",\n",
-    "    \"technology roadmap\", \"innovation strategy\",\n",
-    "    \"dual use\", \"dual-use\",\n",
-    "    \"artificial intelligence\", \"machine learning\",\n",
-    "    \"cybersecurity\", \"digital twin\",\n",
-    "    \"quantum\", \"photonics\", \"semiconductor\",\n",
-    "    \"advanced materials\", \"energy storage\",\n",
-    "    \"autonomous systems\", \"robotics\",\n",
-    "    \"smart grid\", \"critical infrastructure\",\n",
-    "    \"space technology\", \"satellite\",\n",
-    "]\n",
-    "\n",
-    "BUYER_SIGNALS = [\n",
-    "    \"innovation\", \"research\", \"universit\", \"institute\",\n",
-    "    \"agency\", \"accelerator\", \"incubator\", \"eit\", \"eic\",\n",
-    "    \"diana\", \"science\", \"nwo\", \"anr\", \"bpifrance\",\n",
-    "    \"vinnova\", \"enterprise ireland\", \"innovate uk\",\n",
-    "    \"rvo\", \"ffg\", \"ncbr\", \"enabel\", \"tekes\",\n",
-    "    \"business finland\", \"horizon\", \"eureka\", \"interreg\",\n",
-    "]\n",
-    "\n",
-    "NEGATIVES = [\n",
-    "    \"valorisation énergétique\", \"valorisation des déchets\",\n",
-    "    \"valorisation des boues\", \"valorisation des papiers\",\n",
-    "    \"valorisation des mâchefers\", \"valorisation des espaces\",\n",
-    "    \"valorisation des marques\", \"valorisation du patrimoine immobilier\",\n",
-    "    \"valorisation des certificats\", \"valorisation des actifs immobiliers\",\n",
-    "    \"unité de valorisation\", \"centre de valorisation\",\n",
-    "    \"valorisation foncière\", \"valorisation du patrimoine bâti\",\n",
-    "    \"commercialisation de locaux\", \"commercialisation du patrimoine\",\n",
-    "    \"commercialisation des actifs\", \"commercialisation immobilière\",\n",
-    "    \"gestion locative\", \"mandat de gestion\",\n",
-    "    \"locaux commerciaux\", \"habitations à loyer\",\n",
-    "    \"patrimoine résidentiel\",\n",
-    "    \"noise control\", \"baulärm\", \"car park\", \"parking lot\",\n",
-    "    \"building maintenance\", \"cleaning service\", \"catering service\",\n",
-    "    \"waste management\", \"refuse collection\", \"sludge\",\n",
-    "    \"urée\", \"déchets ménagers\", \"bacs roulants\", \"incineration\",\n",
-    "    \"fire alarm\", \"cctv installation\", \"security guard\",\n",
-    "    \"grounds maintenance\", \"road construction\", \"bridge construction\",\n",
-    "    \"electrical installation work\", \"plumbing\",\n",
-    "]\n",
-    "\n",
-    "LIVE_TYPES  = {\"cn-standard\",\"cn-social\",\"cn-desg\",\"cn-tran\",\n",
-    "               \"pin-cfc-standard\",\"pin-cfc-social\",\"pin-only\"}\n",
-    "INTEL_TYPES = {\"can-standard\",\"can-social\",\"can-desg\",\n",
-    "               \"can-tran\",\"can-modif\"}\n",
-    "\n",
-    "DM_PROFILE = \"\"\"\n",
-    "DevelopMinded is a deep-tech commercialisation and venture support firm.\n",
-    "They are hired to:\n",
-    "- Support technology valorisation / commercialisation of R&D results\n",
-    "- Deliver exploitation and dissemination workstreams in EU-funded projects\n",
-    "- Provide market intelligence and go-to-market strategy for deep tech\n",
-    "- Support investor readiness, fundraising strategy, venture building\n",
-    "- Coach startups through EIC, Horizon Europe, EIT, DIANA programmes\n",
-    "- Map innovation ecosystems, stakeholder engagement, regulatory navigation\n",
-    "\n",
-    "Their technology domains: AI/ML, cybersecurity, digital twins, quantum,\n",
-    "semiconductors, photonics, advanced materials, energy storage,\n",
-    "defence/security/space, autonomous systems, robotics, smart grids.\n",
-    "\n",
-    "They are NOT relevant for:\n",
-    "- Physical construction, road works, building maintenance\n",
-    "- Waste management, energy plant operation\n",
-    "- Real estate letting or commercialisation of property\n",
-    "- Security guarding, cleaning, catering\n",
-    "- Standard IT procurement (software licences, off-the-shelf hardware)\n",
-    "- Medical supplies, pharmaceuticals\n",
-    "- Generic legal, audit, or financial audit services\n",
-    "- Website development or IT system maintenance\n",
-    "\"\"\"\n",
-    "\n",
-    "# ═══════════════════════════════════════════════════════════════\n",
-    "# HELPERS\n",
-    "# ═══════════════════════════════════════════════════════════════\n",
-    "\n",
-    "def flat(v) -> str:\n",
-    "    if not v: return \"\"\n",
-    "    if isinstance(v, str): return v.strip()\n",
-    "    if isinstance(v, list):\n",
-    "        return \" | \".join(p for p in [flat(i) for i in v] if p)\n",
-    "    if isinstance(v, dict):\n",
-    "        for k in (\"eng\",\"ENG\",\"fra\",\"FRA\",\"nld\",\"NLD\",\"deu\",\"DEU\"):\n",
-    "            if k in v and v[k]: return flat(v[k])\n",
-    "        for val in v.values():\n",
-    "            s = flat(val)\n",
-    "            if s: return s\n",
-    "    return str(v).strip() if v else \"\"\n",
-    "\n",
-    "\n",
-    "def parse_deadline(raw):\n",
-    "    if not raw: return None\n",
-    "    if isinstance(raw, list): raw = raw[0] if raw else None\n",
-    "    if isinstance(raw, dict): raw = next(iter(raw.values()), None)\n",
-    "    if not raw or not isinstance(raw, str): return None\n",
-    "    for fmt in (\"%Y-%m-%dT%H:%M:%S%z\", \"%Y-%m-%dT%H:%M:%S.%f%z\",\n",
-    "                \"%Y-%m-%dT%H:%M:%S\", \"%Y-%m-%d\"):\n",
-    "        try:\n",
-    "            dt = datetime.strptime(raw[:25], fmt)\n",
-    "            if dt.tzinfo is None:\n",
-    "                dt = dt.replace(tzinfo=timezone.utc)\n",
-    "            return dt\n",
-    "        except ValueError:\n",
-    "            continue\n",
-    "    return None\n",
-    "\n",
-    "\n",
-    "def score_notice(title: str, buyer: str, ntype: str):\n",
-    "    title_low = title.lower()\n",
-    "    text      = f\"{title} {buyer}\".lower()\n",
-    "    buyer_low = buyer.lower()\n",
-    "    if any(neg in title_low for neg in NEGATIVES):\n",
-    "        return -999, \"skip\", [], []\n",
-    "    t1 = [t for t in TIER1 if t in text]\n",
-    "    t2 = [t for t in TIER2 if t in text]\n",
-    "    buyer_boost = 2 if any(sig in buyer_low for sig in BUYER_SIGNALS) else 0\n",
-    "    sc = 7 * len(t1) + 3 * len(t2) + buyer_boost\n",
-    "    if ntype in INTEL_TYPES: sc -= 5\n",
-    "    if sc < MIN_SCORE: return sc, \"skip\", t1, t2\n",
-    "    if ntype in INTEL_TYPES:           bucket = \"Market intelligence\"\n",
-    "    elif t1:                           bucket = \"Live opportunity\"\n",
-    "    elif len(t2) >= 2 and buyer_boost: bucket = \"Live opportunity\"\n",
-    "    elif len(t2) >= 3:                 bucket = \"Possible opportunity\"\n",
-    "    else:                              bucket = \"skip\"\n",
-    "    return sc, bucket, t1, t2\n",
-    "\n",
-    "\n",
-    "def extract(raw: dict) -> dict:\n",
-    "    pub   = flat(raw.get(\"publication-number\")) or \"—\"\n",
-    "    title = flat(raw.get(\"notice-title\"))       or \"—\"\n",
-    "    buyer = flat(raw.get(\"buyer-name\"))         or \"—\"\n",
-    "    ntype = flat(raw.get(\"notice-type\"))        or \"—\"\n",
-    "    dl_dt = parse_deadline(raw.get(\"BT-13(t)-Part\"))\n",
-    "    return {\n",
-    "        \"pub_num\":     pub,\n",
-    "        \"title\":       title,\n",
-    "        \"buyer\":       buyer,\n",
-    "        \"notice_type\": ntype,\n",
-    "        \"deadline_dt\": dl_dt,\n",
-    "        \"deadline\":    dl_dt.strftime(\"%Y-%m-%d\") if dl_dt else \"—\",\n",
-    "        \"link\":        f\"https://ted.europa.eu/en/notice/-/detail/{pub}\" if pub != \"—\" else \"\",\n",
-    "    }\n",
-    "\n",
-    "# ═══════════════════════════════════════════════════════════════\n",
-    "# STEP 1 — FETCH\n",
-    "# ═══════════════════════════════════════════════════════════════\n",
-    "\n",
-    "def make_query():\n",
-    "    parts = \" OR \".join(f'FT ~ \"{k}\"' for k in BROAD_SEARCH_TERMS[:14])\n",
-    "    since = (datetime.now() - timedelta(days=DAYS_BACK)).strftime(\"%Y%m%d\")\n",
-    "    return f\"({parts}) AND publication-date >= {since}\"\n",
-    "\n",
-    "\n",
-    "def _fetch_page(payload) -> tuple:\n",
-    "    for attempt in range(3):\n",
-    "        try:\n",
-    "            r = requests.post(SEARCH_URL, json=payload, timeout=60)\n",
-    "        except requests.RequestException as e:\n",
-    "            return None, str(e), None, \"?\"\n",
-    "        if r.status_code == 200:\n",
-    "            d = r.json()\n",
-    "            return (d.get(\"notices\", []), None,\n",
-    "                    d.get(\"iterationNextToken\"),\n",
-    "                    d.get(\"totalNoticeCount\", \"?\"))\n",
-    "        elif r.status_code == 429:\n",
-    "            wait = 35 * (attempt + 1)\n",
-    "            print(f\"\\n  Rate limited — waiting {wait}s...\")\n",
-    "            time.sleep(wait)\n",
-    "        else:\n",
-    "            return None, f\"{r.status_code}: {r.text[:100]}\", None, \"?\"\n",
-    "    return None, \"Max retries\", None, \"?\"\n",
-    "\n",
-    "\n",
-    "def fetch(days_back: int = DAYS_BACK) -> tuple[pd.DataFrame, pd.DataFrame]:\n",
-    "    print(\"=\" * 64)\n",
-    "    print(f\"  TED Intelligence — DevelopMinded\")\n",
-    "    print(f\"  {datetime.now():%Y-%m-%d %H:%M UTC}\")\n",
-    "    print(f\"  Window: last {days_back} day(s)\")\n",
-    "    print(\"=\" * 64)\n",
-    "\n",
-    "    # Override DAYS_BACK if passed explicitly\n",
-    "    since = (datetime.now() - timedelta(days=days_back)).strftime(\"%Y%m%d\")\n",
-    "    parts = \" OR \".join(f'FT ~ \"{k}\"' for k in BROAD_SEARCH_TERMS[:14])\n",
-    "    query = f\"({parts}) AND publication-date >= {since}\"\n",
-    "    print(f\"\\nQuery:\\n{query}\\n\")\n",
-    "    print(\"Fetching all pages...\\n\")\n",
-    "\n",
-    "    all_notices, token, page, t0 = [], None, 0, time.time()\n",
-    "    while page < MAX_PAGES:\n",
-    "        payload = {\n",
-    "            \"query\": query, \"fields\": RESPONSE_FIELDS,\n",
-    "            \"limit\": PAGE_SIZE, \"scope\": \"ACTIVE\",\n",
-    "            \"checkQuerySyntax\": False,\n",
-    "            \"paginationMode\": \"ITERATION\",\n",
-    "            \"onlyLatestVersions\": True,\n",
-    "        }\n",
-    "        if token: payload[\"iterationNextToken\"] = token\n",
-    "        notices, err, token, total = _fetch_page(payload)\n",
-    "        if err: print(f\"\\n  Error: {err}\"); break\n",
-    "        if not notices: break\n",
-    "        all_notices.extend(notices)\n",
-    "        page += 1\n",
-    "        print(f\"  Page {page:3d} | +{len(notices):3d} | {len(all_notices):,} / {total:,}\", end=\"\\r\")\n",
-    "        if not token: print(f\"  Page {page:3d} | done ✓\" + \" \" * 30); break\n",
-    "        if page % 10 == 0: time.sleep(0.5)\n",
-    "\n",
-    "    print(f\"\\n\\nFetched {len(all_notices):,} notices in {time.time()-t0:.0f}s\\n\")\n",
-    "    if not all_notices: return pd.DataFrame(), pd.DataFrame()\n",
-    "\n",
-    "    live_rows, intel_rows = [], []\n",
-    "    n_expired = n_no_dl = n_future = n_neg = n_low = 0\n",
-    "\n",
-    "    for raw in all_notices:\n",
-    "        e  = extract(raw)\n",
-    "        dt = e[\"deadline_dt\"]\n",
-    "        if dt is None:             n_no_dl  += 1\n",
-    "        elif dt < DEADLINE_CUTOFF: n_expired += 1; continue\n",
-    "        else:                      n_future += 1\n",
-    "        sc, bucket, t1, t2 = score_notice(e[\"title\"], e[\"buyer\"], e[\"notice_type\"])\n",
-    "        if bucket == \"skip\":\n",
-    "            if sc == -999: n_neg += 1\n",
-    "            else:          n_low += 1\n",
-    "            continue\n",
-    "        row = {k: v for k, v in e.items() if k != \"deadline_dt\"}\n",
-    "        row.update(score=sc, bucket=bucket,\n",
-    "                   t1_hits=\", \".join(t1), t2_hits=\", \".join(t2[:4]))\n",
-    "        (live_rows if bucket != \"Market intelligence\" else intel_rows).append(row)\n",
-    "\n",
-    "    def to_df(rows):\n",
-    "        if not rows: return pd.DataFrame()\n",
-    "        return pd.DataFrame(rows).sort_values(\"score\", ascending=False).reset_index(drop=True)\n",
-    "\n",
-    "    live, intel = to_df(live_rows), to_df(intel_rows)\n",
-    "\n",
-    "    print(\"=\" * 64)\n",
-    "    print(f\"Deadline : {n_future:,} future | {n_no_dl:,} none | {n_expired:,} expired (dropped)\")\n",
-    "    print(f\"Scoring  : {n_neg:,} negative | {n_low:,} below threshold\")\n",
-    "    print(f\"Results  : 🟢 {len(live):,} live | 📊 {len(intel):,} market intel\\n\")\n",
-    "\n",
-    "    if not live.empty:\n",
-    "        print(\"── LIVE OPPORTUNITIES ──\")\n",
-    "        print(live[[\"score\",\"bucket\",\"deadline\",\"title\",\"buyer\",\"t1_hits\"]].to_string(index=False))\n",
-    "    if not intel.empty:\n",
-    "        print(\"\\n── MARKET INTELLIGENCE ──\")\n",
-    "        print(intel[[\"score\",\"deadline\",\"title\",\"buyer\",\"t1_hits\"]].to_string(index=False))\n",
-    "\n",
-    "    return live, intel\n",
-    "\n",
-    "\n",
-    "# ═══════════════════════════════════════════════════════════════\n",
-    "# STEP 3 — EXPORT\n",
-    "# ═══════════════════════════════════════════════════════════════\n",
-    "\n",
-    "def export(live: pd.DataFrame, intel: pd.DataFrame,\n",
-    "           filename: str = \"ted_tenders.xlsx\"):\n",
-    "    if live.empty and intel.empty: print(\"Nothing to export.\"); return\n",
-    "    live_cols  = [\"score\",\"bucket\",\"deadline\",\"title\",\"buyer\",\n",
-    "                  \"notice_type\",\"t1_hits\",\"ai_reason\",\"link\"]\n",
-    "    intel_cols = [\"score\",\"deadline\",\"title\",\"buyer\",\n",
-    "                  \"notice_type\",\"t1_hits\",\"link\"]\n",
-    "    with pd.ExcelWriter(filename, engine=\"openpyxl\") as w:\n",
-    "        for df, sheet, cols in [\n",
-    "            (live,  \"Live Opportunities\",  live_cols),\n",
-    "            (intel, \"Market Intelligence\", intel_cols),\n",
-    "        ]:\n",
-    "            if df.empty: continue\n",
-    "            out = df[[c for c in cols if c in df.columns]]\n",
-    "            out.to_excel(w, index=False, sheet_name=sheet)\n",
-    "            ws = w.sheets[sheet]\n",
-    "            for col in ws.columns:\n",
-    "                ws.column_dimensions[col[0].column_letter].width = min(\n",
-    "                    max(len(str(c.value or \"\")) for c in col)+4, 60)\n",
-    "    print(f\"Exported → {filename}\")\n",
-    "    print(f\"  Live Opportunities  : {len(live)}\")\n",
-    "    print(f\"  Market Intelligence : {len(intel)}\")\n",
-    "    return filename\n",
-    "\n",
-    "# ═══════════════════════════════════════════════════════════════\n",
-    "# ENTRY POINT — called by GitHub Actions\n",
-    "# ═══════════════════════════════════════════════════════════════\n",
-    "\n",
-    "if __name__ == \"__main__\":\n",
-    "    live, intel = fetch()\n",
-    "    # Uncomment to enable AI filter (needs ANTHROPIC_API_KEY env var):\n",
-    "    # live = ai_filter(live)\n",
-    "    export(live, intel)"
-   ]
-  }
- ],
- "metadata": {
-  "kernelspec": {
-   "display_name": "Python 3 (ipykernel)",
-   "language": "python",
-   "name": "python3"
-  },
-  "language_info": {
-   "codemirror_mode": {
-    "name": "ipython",
-    "version": 3
-   },
-   "file_extension": ".py",
-   "mimetype": "text/x-python",
-   "name": "python",
-   "nbconvert_exporter": "python",
-   "pygments_lexer": "ipython3",
-   "version": "3.12.2"
-  }
- },
- "nbformat": 4,
- "nbformat_minor": 5
-}
+import requests, re, time, os
+import pandas as pd
+from datetime import datetime, timedelta, timezone
+# ═══════════════════════════════════════════════════════════════
+# CONFIGURATION
+# ═══════════════════════════════════════════════════════════════
+
+# How far back to look. Default = 1 day for the daily runner.
+# Set to 90 for a full backfill when running manually.
+DAYS_BACK        = int(os.environ.get("DAYS_BACK", "1"))
+
+PAGE_SIZE        = 250
+MAX_PAGES        = 999
+MIN_SCORE        = 3
+AI_MAX_NOTICES   = 50
+AI_WORKERS       = 4
+
+TODAY            = datetime.now(timezone.utc)
+DEADLINE_CUTOFF  = TODAY - timedelta(hours=24)
+
+SEARCH_URL   = "https://api.ted.europa.eu/v3/notices/search"
+CLAUDE_URL   = "https://api.anthropic.com/v1/messages"
+CLAUDE_MODEL = "claude-sonnet-4-20250514"
+
+# Anthropic API key — set as env var in GitHub Actions / Streamlit secrets
+# Or paste directly here for local use
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+
+RESPONSE_FIELDS = [
+    "publication-number",
+    "notice-title",
+    "buyer-name",
+    "notice-type",
+    "BT-13(t)-Part",
+]
+
+# ── Broad search terms (cast wide net, score locally) ────────────
+BROAD_SEARCH_TERMS = [
+    "innovation", "commercialisation", "valorisation",
+    "technology transfer", "advisory", "market study",
+    "consultancy", "knowledge transfer", "exploitation",
+    "research", "startup", "deep tech",
+    "horizon europe", "dissemination",
+]
+
+# ── Tier 1: DM core language — +7 per hit ────────────────────────
+TIER1 = [
+    "technology valorisation", "tech valorisation",
+    "technology commercialisation", "tech commercialisation",
+    "exploitation of results", "exploitation and dissemination",
+    "dissemination and exploitation",
+    "commercialisation of research", "commercialisation of innovation",
+    "knowledge transfer", "technology transfer",
+    "research to market", "research commercialisation",
+    "ip commercialisation", "ip to market",
+    "market uptake", "market adoption",
+    "eic accelerator", "eic business acceleration",
+    "eic bas", "business acceleration service",
+    "horizon europe", "horizon 2020",
+    "eurostars", "eureka cluster",
+    "eit digital", "eit manufacturing", "eit health",
+    "eit urban mobility", "eit food", "eit rawmaterials",
+    "diana programme", "diana accelerator",
+    "nato innovation", "defence innovation accelerator",
+    "venture building", "venture creation", "venture support",
+    "startup support", "startup acceleration",
+    "deeptech", "deep tech",
+    "spin-off", "spin-out", "spinout",
+    "investor readiness", "investment readiness",
+    "pre-commercial procurement", "innovation partnership",
+    "innovation ecosystem", "ecosystem orchestration",
+    "consortium commercialisation", "project commercialisation",
+    "innovation management support", "innovation support services",
+    "scale-up support", "scaleup support",
+    "product-market fit", "market validation",
+    "dual-use technology", "dual use technology",
+]
+
+# ── Tier 2: Contextual terms — +3 per hit ────────────────────────
+TIER2 = [
+    "commercialisation", "valorisation", "go-to-market",
+    "market intelligence", "market study", "market analysis",
+    "competitive analysis", "landscape analysis",
+    "technology assessment", "feasibility study",
+    "business model", "value proposition",
+    "stakeholder mapping", "ecosystem mapping",
+    "advisory services", "strategic advisory",
+    "fundraising support", "funding strategy",
+    "regulatory strategy", "regulatory navigation",
+    "market entry", "market access",
+    "technology roadmap", "innovation strategy",
+    "dual use", "dual-use",
+    "artificial intelligence", "machine learning",
+    "cybersecurity", "digital twin",
+    "quantum", "photonics", "semiconductor",
+    "advanced materials", "energy storage",
+    "autonomous systems", "robotics",
+    "smart grid", "critical infrastructure",
+    "space technology", "satellite",
+]
+
+BUYER_SIGNALS = [
+    "innovation", "research", "universit", "institute",
+    "agency", "accelerator", "incubator", "eit", "eic",
+    "diana", "science", "nwo", "anr", "bpifrance",
+    "vinnova", "enterprise ireland", "innovate uk",
+    "rvo", "ffg", "ncbr", "enabel", "tekes",
+    "business finland", "horizon", "eureka", "interreg",
+]
+
+NEGATIVES = [
+    "valorisation énergétique", "valorisation des déchets",
+    "valorisation des boues", "valorisation des papiers",
+    "valorisation des mâchefers", "valorisation des espaces",
+    "valorisation des marques", "valorisation du patrimoine immobilier",
+    "valorisation des certificats", "valorisation des actifs immobiliers",
+    "unité de valorisation", "centre de valorisation",
+    "valorisation foncière", "valorisation du patrimoine bâti",
+    "commercialisation de locaux", "commercialisation du patrimoine",
+    "commercialisation des actifs", "commercialisation immobilière",
+    "gestion locative", "mandat de gestion",
+    "locaux commerciaux", "habitations à loyer",
+    "patrimoine résidentiel",
+    "noise control", "baulärm", "car park", "parking lot",
+    "building maintenance", "cleaning service", "catering service",
+    "waste management", "refuse collection", "sludge",
+    "urée", "déchets ménagers", "bacs roulants", "incineration",
+    "fire alarm", "cctv installation", "security guard",
+    "grounds maintenance", "road construction", "bridge construction",
+    "electrical installation work", "plumbing",
+]
+
+LIVE_TYPES  = {"cn-standard","cn-social","cn-desg","cn-tran",
+               "pin-cfc-standard","pin-cfc-social","pin-only"}
+INTEL_TYPES = {"can-standard","can-social","can-desg",
+               "can-tran","can-modif"}
+
+DM_PROFILE = """
+DevelopMinded is a deep-tech commercialisation and venture support firm.
+They are hired to:
+- Support technology valorisation / commercialisation of R&D results
+- Deliver exploitation and dissemination workstreams in EU-funded projects
+- Provide market intelligence and go-to-market strategy for deep tech
+- Support investor readiness, fundraising strategy, venture building
+- Coach startups through EIC, Horizon Europe, EIT, DIANA programmes
+- Map innovation ecosystems, stakeholder engagement, regulatory navigation
+
+Their technology domains: AI/ML, cybersecurity, digital twins, quantum,
+semiconductors, photonics, advanced materials, energy storage,
+defence/security/space, autonomous systems, robotics, smart grids.
+
+They are NOT relevant for:
+- Physical construction, road works, building maintenance
+- Waste management, energy plant operation
+- Real estate letting or commercialisation of property
+- Security guarding, cleaning, catering
+- Standard IT procurement (software licences, off-the-shelf hardware)
+- Medical supplies, pharmaceuticals
+- Generic legal, audit, or financial audit services
+- Website development or IT system maintenance
+"""
+
+# ═══════════════════════════════════════════════════════════════
+# HELPERS
+# ═══════════════════════════════════════════════════════════════
+
+def flat(v) -> str:
+    if not v: return ""
+    if isinstance(v, str): return v.strip()
+    if isinstance(v, list):
+        return " | ".join(p for p in [flat(i) for i in v] if p)
+    if isinstance(v, dict):
+        for k in ("eng","ENG","fra","FRA","nld","NLD","deu","DEU"):
+            if k in v and v[k]: return flat(v[k])
+        for val in v.values():
+            s = flat(val)
+            if s: return s
+    return str(v).strip() if v else ""
+
+
+def parse_deadline(raw):
+    if not raw: return None
+    if isinstance(raw, list): raw = raw[0] if raw else None
+    if isinstance(raw, dict): raw = next(iter(raw.values()), None)
+    if not raw or not isinstance(raw, str): return None
+    for fmt in ("%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%S.%f%z",
+                "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d"):
+        try:
+            dt = datetime.strptime(raw[:25], fmt)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt
+        except ValueError:
+            continue
+    return None
+
+
+def score_notice(title: str, buyer: str, ntype: str):
+    title_low = title.lower()
+    text      = f"{title} {buyer}".lower()
+    buyer_low = buyer.lower()
+    if any(neg in title_low for neg in NEGATIVES):
+        return -999, "skip", [], []
+    t1 = [t for t in TIER1 if t in text]
+    t2 = [t for t in TIER2 if t in text]
+    buyer_boost = 2 if any(sig in buyer_low for sig in BUYER_SIGNALS) else 0
+    sc = 7 * len(t1) + 3 * len(t2) + buyer_boost
+    if ntype in INTEL_TYPES: sc -= 5
+    if sc < MIN_SCORE: return sc, "skip", t1, t2
+    if ntype in INTEL_TYPES:           bucket = "Market intelligence"
+    elif t1:                           bucket = "Live opportunity"
+    elif len(t2) >= 2 and buyer_boost: bucket = "Live opportunity"
+    elif len(t2) >= 3:                 bucket = "Possible opportunity"
+    else:                              bucket = "skip"
+    return sc, bucket, t1, t2
+
+
+def extract(raw: dict) -> dict:
+    pub   = flat(raw.get("publication-number")) or "—"
+    title = flat(raw.get("notice-title"))       or "—"
+    buyer = flat(raw.get("buyer-name"))         or "—"
+    ntype = flat(raw.get("notice-type"))        or "—"
+    dl_dt = parse_deadline(raw.get("BT-13(t)-Part"))
+    return {
+        "pub_num":     pub,
+        "title":       title,
+        "buyer":       buyer,
+        "notice_type": ntype,
+        "deadline_dt": dl_dt,
+        "deadline":    dl_dt.strftime("%Y-%m-%d") if dl_dt else "—",
+        "link":        f"https://ted.europa.eu/en/notice/-/detail/{pub}" if pub != "—" else "",
+    }
+
+# ═══════════════════════════════════════════════════════════════
+# STEP 1 — FETCH
+# ═══════════════════════════════════════════════════════════════
+
+def make_query():
+    parts = " OR ".join(f'FT ~ "{k}"' for k in BROAD_SEARCH_TERMS[:14])
+    since = (datetime.now() - timedelta(days=DAYS_BACK)).strftime("%Y%m%d")
+    return f"({parts}) AND publication-date >= {since}"
+
+
+def _fetch_page(payload) -> tuple:
+    for attempt in range(3):
+        try:
+            r = requests.post(SEARCH_URL, json=payload, timeout=60)
+        except requests.RequestException as e:
+            return None, str(e), None, "?"
+        if r.status_code == 200:
+            d = r.json()
+            return (d.get("notices", []), None,
+                    d.get("iterationNextToken"),
+                    d.get("totalNoticeCount", "?"))
+        elif r.status_code == 429:
+            wait = 35 * (attempt + 1)
+            print(f"\n  Rate limited — waiting {wait}s...")
+            time.sleep(wait)
+        else:
+            return None, f"{r.status_code}: {r.text[:100]}", None, "?"
+    return None, "Max retries", None, "?"
+
+
+def fetch(days_back: int = DAYS_BACK) -> tuple[pd.DataFrame, pd.DataFrame]:
+    print("=" * 64)
+    print(f"  TED Intelligence — DevelopMinded")
+    print(f"  {datetime.now():%Y-%m-%d %H:%M UTC}")
+    print(f"  Window: last {days_back} day(s)")
+    print("=" * 64)
+
+    # Override DAYS_BACK if passed explicitly
+    since = (datetime.now() - timedelta(days=days_back)).strftime("%Y%m%d")
+    parts = " OR ".join(f'FT ~ "{k}"' for k in BROAD_SEARCH_TERMS[:14])
+    query = f"({parts}) AND publication-date >= {since}"
+    print(f"\nQuery:\n{query}\n")
+    print("Fetching all pages...\n")
+
+    all_notices, token, page, t0 = [], None, 0, time.time()
+    while page < MAX_PAGES:
+        payload = {
+            "query": query, "fields": RESPONSE_FIELDS,
+            "limit": PAGE_SIZE, "scope": "ACTIVE",
+            "checkQuerySyntax": False,
+            "paginationMode": "ITERATION",
+            "onlyLatestVersions": True,
+        }
+        if token: payload["iterationNextToken"] = token
+        notices, err, token, total = _fetch_page(payload)
+        if err: print(f"\n  Error: {err}"); break
+        if not notices: break
+        all_notices.extend(notices)
+        page += 1
+        print(f"  Page {page:3d} | +{len(notices):3d} | {len(all_notices):,} / {total:,}", end="\r")
+        if not token: print(f"  Page {page:3d} | done ✓" + " " * 30); break
+        if page % 10 == 0: time.sleep(0.5)
+
+    print(f"\n\nFetched {len(all_notices):,} notices in {time.time()-t0:.0f}s\n")
+    if not all_notices: return pd.DataFrame(), pd.DataFrame()
+
+    live_rows, intel_rows = [], []
+    n_expired = n_no_dl = n_future = n_neg = n_low = 0
+
+    for raw in all_notices:
+        e  = extract(raw)
+        dt = e["deadline_dt"]
+        if dt is None:             n_no_dl  += 1
+        elif dt < DEADLINE_CUTOFF: n_expired += 1; continue
+        else:                      n_future += 1
+        sc, bucket, t1, t2 = score_notice(e["title"], e["buyer"], e["notice_type"])
+        if bucket == "skip":
+            if sc == -999: n_neg += 1
+            else:          n_low += 1
+            continue
+        row = {k: v for k, v in e.items() if k != "deadline_dt"}
+        row.update(score=sc, bucket=bucket,
+                   t1_hits=", ".join(t1), t2_hits=", ".join(t2[:4]))
+        (live_rows if bucket != "Market intelligence" else intel_rows).append(row)
+
+    def to_df(rows):
+        if not rows: return pd.DataFrame()
+        return pd.DataFrame(rows).sort_values("score", ascending=False).reset_index(drop=True)
+
+    live, intel = to_df(live_rows), to_df(intel_rows)
+
+    print("=" * 64)
+    print(f"Deadline : {n_future:,} future | {n_no_dl:,} none | {n_expired:,} expired (dropped)")
+    print(f"Scoring  : {n_neg:,} negative | {n_low:,} below threshold")
+    print(f"Results  : 🟢 {len(live):,} live | 📊 {len(intel):,} market intel\n")
+
+    if not live.empty:
+        print("── LIVE OPPORTUNITIES ──")
+        print(live[["score","bucket","deadline","title","buyer","t1_hits"]].to_string(index=False))
+    if not intel.empty:
+        print("\n── MARKET INTELLIGENCE ──")
+        print(intel[["score","deadline","title","buyer","t1_hits"]].to_string(index=False))
+
+    return live, intel
+
+
+# ═══════════════════════════════════════════════════════════════
+# STEP 3 — EXPORT
+# ═══════════════════════════════════════════════════════════════
+
+def export(live: pd.DataFrame, intel: pd.DataFrame,
+           filename: str = "ted_tenders.xlsx"):
+    if live.empty and intel.empty: print("Nothing to export."); return
+    live_cols  = ["score","bucket","deadline","title","buyer",
+                  "notice_type","t1_hits","ai_reason","link"]
+    intel_cols = ["score","deadline","title","buyer",
+                  "notice_type","t1_hits","link"]
+    with pd.ExcelWriter(filename, engine="openpyxl") as w:
+        for df, sheet, cols in [
+            (live,  "Live Opportunities",  live_cols),
+            (intel, "Market Intelligence", intel_cols),
+        ]:
+            if df.empty: continue
+            out = df[[c for c in cols if c in df.columns]]
+            out.to_excel(w, index=False, sheet_name=sheet)
+            ws = w.sheets[sheet]
+            for col in ws.columns:
+                ws.column_dimensions[col[0].column_letter].width = min(
+                    max(len(str(c.value or "")) for c in col)+4, 60)
+    print(f"Exported → {filename}")
+    print(f"  Live Opportunities  : {len(live)}")
+    print(f"  Market Intelligence : {len(intel)}")
+    return filename
+
+# ═══════════════════════════════════════════════════════════════
+# ENTRY POINT — called by GitHub Actions
+# ═══════════════════════════════════════════════════════════════
+
+if __name__ == "__main__":
+    live, intel = fetch()
+    # Uncomment to enable AI filter (needs ANTHROPIC_API_KEY env var):
+    # live = ai_filter(live)
+    export(live, intel)
