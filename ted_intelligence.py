@@ -1,6 +1,24 @@
+"""
+TED Tender Intelligence — DevelopMinded
+========================================
+Daily runner: fetches notices published in the last 24 hours,
+scores them against DM's profile, exports to Excel.
+
+USAGE:
+    # In Jupyter (one-off):
+    exec(open("ted_intelligence.py").read())
+    live, intel = fetch()
+    export(live, intel)
+
+    # As a script (called by GitHub Actions daily):
+    python ted_intelligence.py
+"""
+
 import requests, re, time, os
 import pandas as pd
 from datetime import datetime, timedelta, timezone
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
 # ═══════════════════════════════════════════════════════════════
 # CONFIGURATION
 # ═══════════════════════════════════════════════════════════════
@@ -336,6 +354,89 @@ def fetch(days_back: int = DAYS_BACK) -> tuple[pd.DataFrame, pd.DataFrame]:
 
     return live, intel
 
+# ═══════════════════════════════════════════════════════════════
+# STEP 2 — AI FILTER (optional — needs ANTHROPIC_API_KEY)
+# ═══════════════════════════════════════════════════════════════
+
+def _fetch_notice_text(pub_num: str) -> str:
+    try:
+        r = requests.get(
+            f"https://ted.europa.eu/en/notice/{pub_num}/html",
+            timeout=20, headers={"Accept-Language": "en"})
+        if r.status_code != 200: return ""
+        text = re.sub(r'<[^>]+>', ' ', r.text)
+        return re.sub(r'\s+', ' ', text).strip()[:3000]
+    except Exception:
+        return ""
+
+
+def _ask_claude(title: str, buyer: str, notice_text: str) -> tuple[bool, str]:
+    if not ANTHROPIC_API_KEY:
+        return True, "No API key — kept"
+    prompt = f"""You are evaluating whether a public procurement tender is relevant for DevelopMinded.
+
+{DM_PROFILE}
+
+TENDER TITLE: {title}
+BUYER: {buyer}
+NOTICE TEXT:
+{notice_text or "(not available — judge on title and buyer only)"}
+
+Is this tender genuinely relevant for DevelopMinded?
+Answer in exactly this format:
+RELEVANT: YES or NO
+REASON: one sentence"""
+    try:
+        r = requests.post(
+            CLAUDE_URL,
+            headers={
+                "x-api-key":         ANTHROPIC_API_KEY,
+                "anthropic-version": "2023-06-01",
+                "content-type":      "application/json",
+            },
+            json={"model": CLAUDE_MODEL, "max_tokens": 150,
+                  "messages": [{"role": "user", "content": prompt}]},
+            timeout=30,
+        )
+        if r.status_code != 200: return True, f"API error {r.status_code} — kept"
+        text     = r.json()["content"][0]["text"].strip()
+        relevant = "RELEVANT: YES" in text.upper()
+        reason   = next((l[7:].strip() for l in text.split("\n")
+                         if l.upper().startswith("REASON:")), "")
+        return relevant, reason
+    except Exception as e:
+        return True, f"Error: {e} — kept"
+
+
+def _check_one(row: dict) -> dict:
+    text     = _fetch_notice_text(row.get("pub_num",""))
+    rel, why = _ask_claude(row.get("title",""), row.get("buyer",""), text)
+    return {**row, "ai_relevant": rel, "ai_reason": why}
+
+
+def ai_filter(live: pd.DataFrame, max_notices: int = AI_MAX_NOTICES) -> pd.DataFrame:
+    if live.empty: print("Nothing to filter."); return live
+    to_check = live.head(max_notices)
+    print(f"\n{'='*64}")
+    print(f"AI filter — checking {len(to_check)} notices")
+    print("=" * 64 + "\n")
+    rows, results = to_check.to_dict("records"), []
+    with ThreadPoolExecutor(max_workers=AI_WORKERS) as pool:
+        futures = {pool.submit(_check_one, r): i for i, r in enumerate(rows)}
+        done = 0
+        for fut in as_completed(futures):
+            res = fut.result(); done += 1
+            icon = "✅" if res["ai_relevant"] else "❌"
+            print(f"  [{done:2d}/{len(rows)}] {icon}  {str(res.get('title',''))[:65]}")
+            results.append(res)
+    df   = pd.DataFrame(results)
+    kept = df[df["ai_relevant"]].sort_values("score", ascending=False).reset_index(drop=True)
+    removed = df[~df["ai_relevant"]]
+    print(f"\n✅ Kept {len(kept)}  |  ❌ Removed {len(removed)}")
+    if not removed.empty:
+        for _, r in removed.iterrows():
+            print(f"  ❌ {str(r['title'])[:70]}\n     → {r['ai_reason']}")
+    return kept
 
 # ═══════════════════════════════════════════════════════════════
 # STEP 3 — EXPORT
@@ -373,4 +474,50 @@ if __name__ == "__main__":
     live, intel = fetch()
     # Uncomment to enable AI filter (needs ANTHROPIC_API_KEY env var):
     # live = ai_filter(live)
-    export(live, intel)
+    save_to_csv(live, intel)   # appends to ted_results.csv (committed to repo)
+    export(live, intel)        # also writes ted_tenders.xlsx as backup artifact
+
+
+# ═══════════════════════════════════════════════════════════════
+# APPEND TO CSV  (replaces export() for the daily GitHub run)
+# ═══════════════════════════════════════════════════════════════
+
+def save_to_csv(live: pd.DataFrame, intel: pd.DataFrame,
+                csv_file: str = "ted_results.csv"):
+    """
+    Append today's results to the cumulative CSV.
+    Deduplicates on pub_num so re-runs don't create duplicates.
+    """
+    if live.empty and intel.empty:
+        print("Nothing to save.")
+        return
+
+    # Tag rows with today's date and bucket
+    today = datetime.now().strftime("%Y-%m-%d")
+    frames = []
+    if not live.empty:
+        live_out = live.copy()
+        live_out["fetched_date"] = today
+        frames.append(live_out)
+    if not intel.empty:
+        intel_out = intel.copy()
+        intel_out["fetched_date"] = today
+        frames.append(intel_out)
+
+    new_rows = pd.concat(frames, ignore_index=True)
+
+    # Load existing CSV and append, deduplicating on pub_num + fetched_date
+    try:
+        existing = pd.read_csv(csv_file)
+        combined = pd.concat([existing, new_rows], ignore_index=True)
+        combined = combined.drop_duplicates(
+            subset=["pub_num", "fetched_date"], keep="last")
+    except FileNotFoundError:
+        combined = new_rows
+
+    combined = combined.sort_values(
+        ["fetched_date", "score"], ascending=[False, False]
+    ).reset_index(drop=True)
+
+    combined.to_csv(csv_file, index=False)
+    print(f"Saved → {csv_file}  ({len(combined):,} total rows, {len(new_rows)} new today)")
