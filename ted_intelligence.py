@@ -68,34 +68,34 @@ TIER1 = [
     "exploitation of results", "exploitation and dissemination",
     "dissemination and exploitation",
     "commercialisation of research", "commercialisation of innovation",
-    "knowledge transfer", "technology transfer",
-    "research to market", "research commercialisation",
+    "technology transfer office", "research commercialisation",
     "ip commercialisation", "ip to market",
     "market uptake", "market adoption",
     "eic accelerator", "eic business acceleration",
     "eic bas", "business acceleration service",
-    "horizon europe", "horizon 2020",
     "eurostars", "eureka cluster",
     "eit digital", "eit manufacturing", "eit health",
     "eit urban mobility", "eit food", "eit rawmaterials",
     "diana programme", "diana accelerator",
-    "nato innovation", "defence innovation accelerator",
+    "nato innovation fund", "defence innovation accelerator",
     "venture building", "venture creation", "venture support",
-    "startup support", "startup acceleration",
+    "startup support services", "startup acceleration",
     "deeptech", "deep tech",
-    "spin-off", "spin-out", "spinout",
+    "spinout support", "spin-out support",
     "investor readiness", "investment readiness",
-    "pre-commercial procurement", "innovation partnership",
     "innovation ecosystem", "ecosystem orchestration",
     "consortium commercialisation", "project commercialisation",
     "innovation management support", "innovation support services",
     "scale-up support", "scaleup support",
     "product-market fit", "market validation",
-    "dual-use technology", "dual use technology",
 ]
 
 # ── Tier 2: Contextual terms — +3 per hit ────────────────────────
 TIER2 = [
+    "horizon europe", "knowledge transfer", "technology transfer",
+    "pre-commercial procurement", "innovation partnership",
+    "spin-off", "spinout", "spin-out",
+    "dual-use technology", "dual use technology",
     "commercialisation", "valorisation", "go-to-market",
     "market intelligence", "market study", "market analysis",
     "competitive analysis", "landscape analysis",
@@ -146,6 +146,14 @@ NEGATIVES = [
     "fire alarm", "cctv installation", "security guard",
     "grounds maintenance", "road construction", "bridge construction",
     "electrical installation work", "plumbing",
+    # Physical science equipment (Horizon funding ≠ advisory work)
+    "refrigerating and freezing", "cryogenic", "hardwarekomponenten",
+    "satellite hardware", "bodenstationsnetzwerk", "ground station network",
+    "suministro, instalación", "beschaffung von hardware",
+    # Website / platform build (knowledge transfer hub ≠ advisory)
+    "site design services", "web portal development", "e-learning platform",
+    # Physical bridge / infrastructure (innovation partnership mechanism ≠ advisory)
+    "bridge cover", "bridge deck", "procurement of a bridge",
 ]
 
 LIVE_TYPES  = {"cn-standard","cn-social","cn-desg","cn-tran",
