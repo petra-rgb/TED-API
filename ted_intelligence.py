@@ -1,18 +1,3 @@
-"""
-TED Tender Intelligence — DevelopMinded
-========================================
-Daily runner: fetches notices published in the last 24 hours,
-scores them against DM's profile, exports to Excel.
-
-USAGE:
-    # In Jupyter (one-off):
-    exec(open("ted_intelligence.py").read())
-    live, intel = fetch()
-    export(live, intel)
-
-    # As a script (called by GitHub Actions daily):
-    python ted_intelligence.py
-"""
 
 import requests, re, time, os
 import pandas as pd
@@ -161,34 +146,7 @@ LIVE_TYPES  = {"cn-standard","cn-social","cn-desg","cn-tran",
 INTEL_TYPES = {"can-standard","can-social","can-desg",
                "can-tran","can-modif"}
 
-DM_PROFILE = """
-DevelopMinded is a deep-tech commercialisation and venture support firm.
-They are hired to:
-- Support technology valorisation / commercialisation of R&D results
-- Deliver exploitation and dissemination workstreams in EU-funded projects
-- Provide market intelligence and go-to-market strategy for deep tech
-- Support investor readiness, fundraising strategy, venture building
-- Coach startups through EIC, Horizon Europe, EIT, DIANA programmes
-- Map innovation ecosystems, stakeholder engagement, regulatory navigation
 
-Their technology domains: AI/ML, cybersecurity, digital twins, quantum,
-semiconductors, photonics, advanced materials, energy storage,
-defence/security/space, autonomous systems, robotics, smart grids.
-
-They are NOT relevant for:
-- Physical construction, road works, building maintenance
-- Waste management, energy plant operation
-- Real estate letting or commercialisation of property
-- Security guarding, cleaning, catering
-- Standard IT procurement (software licences, off-the-shelf hardware)
-- Medical supplies, pharmaceuticals
-- Generic legal, audit, or financial audit services
-- Website development or IT system maintenance
-"""
-
-# ═══════════════════════════════════════════════════════════════
-# HELPERS
-# ═══════════════════════════════════════════════════════════════
 
 def flat(v) -> str:
     if not v: return ""
