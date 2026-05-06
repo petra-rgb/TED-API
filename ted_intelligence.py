@@ -470,14 +470,6 @@ def export(live: pd.DataFrame, intel: pd.DataFrame,
 # ENTRY POINT — called by GitHub Actions
 # ═══════════════════════════════════════════════════════════════
 
-if __name__ == "__main__":
-    live, intel = fetch()
-    # Uncomment to enable AI filter (needs ANTHROPIC_API_KEY env var):
-    # live = ai_filter(live)
-    save_to_csv(live, intel)   # appends to ted_results.csv (committed to repo)
-    export(live, intel)        # also writes ted_tenders.xlsx as backup artifact
-
-
 # ═══════════════════════════════════════════════════════════════
 # APPEND TO CSV  (replaces export() for the daily GitHub run)
 # ═══════════════════════════════════════════════════════════════
@@ -521,3 +513,10 @@ def save_to_csv(live: pd.DataFrame, intel: pd.DataFrame,
 
     combined.to_csv(csv_file, index=False)
     print(f"Saved → {csv_file}  ({len(combined):,} total rows, {len(new_rows)} new today)")
+
+if __name__ == "__main__":
+    live, intel = fetch()
+    # Uncomment to enable AI filter (needs ANTHROPIC_API_KEY env var):
+    # live = ai_filter(live)
+    save_to_csv(live, intel)   # appends to ted_results.csv (committed to repo)
+    export(live, intel)        # also writes ted_tenders.xlsx as backup artifact
