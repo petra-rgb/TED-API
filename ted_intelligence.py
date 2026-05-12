@@ -14,7 +14,7 @@ DAYS_BACK        = int(os.environ.get("DAYS_BACK", "1"))
 
 PAGE_SIZE        = 250
 MAX_PAGES        = 999
-MIN_SCORE        = 3
+MIN_SCORE        = 4
 AI_MAX_NOTICES   = 50
 AI_WORKERS       = 4
 
@@ -29,13 +29,48 @@ CLAUDE_MODEL = "claude-sonnet-4-20250514"
 # Or paste directly here for local use
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 
+DM_PROFILE = """
+DevelopMinded is a technology commercialisation consultancy that supports deep tech spinouts,
+EIC/Horizon Europe grantees, and research-based ventures. Our core services are:
+- Technology commercialisation and exploitation of research results
+- Go-to-market strategy and market intelligence (market sizing, segmentation, competitive analysis)
+- Investment readiness and fundraising support (pitch decks, financial modelling, investor targeting)
+- EU tender bid preparation (e.g. HADEA, EIC, Horizon Europe procurements)
+- Partnership strategy and stakeholder outreach
+- Regulatory pathway analysis for market entry
+- Talent strategy and HR roadmap for scaling ventures
+
+Ideal clients: EIC Accelerator / EIC Transition / EIC Pathfinder grantees, university spinouts,
+deep tech companies (biotech, medtech, cleantech, agtech, defence tech) at TRL 4-7 needing
+commercial and strategic support to reach the market.
+
+NOT relevant: running clinical trials, lab/research execution, software development,
+infrastructure/construction management, policy research, academic surveys, open source
+maintenance, ecological studies, or procurements for physical goods/equipment.
+"""
+
 RESPONSE_FIELDS = [
     "publication-number",
     "notice-title",
     "buyer-name",
     "notice-type",
-    "BT-13(t)-Part",
+    "classification-cpv",
+    "deadline-receipt-tender-date-lot",   # tender submission deadline (date)
+    "BT-131(d)-Lot",                      # same field, BT designation
+    "deadline-date-lot",                  # fallback
+    "BT-13(t)-Part",                      # part-level fallback
 ]
+
+# ── CPV codes — queried directly, guaranteed fetch regardless of keywords ──
+CPV_CODES = {
+    "73200000": "R&D consultancy services",
+    "79410000": "Business & mgmt consultancy",
+    "79411100": "Business development consultancy",
+    "79419000": "Evaluation consultancy",
+}
+
+SLACK_WEBHOOK_URL = os.environ.get("SLACK_WEBHOOK_URL", "")
+DEADLINE_WARN_DAYS = 7   # flag notices with deadline within this many days
 
 # ── Broad search terms (cast wide net, score locally) ────────────
 BROAD_SEARCH_TERMS = [
@@ -58,6 +93,9 @@ TIER1 = [
     "market uptake", "market adoption",
     "eic accelerator", "eic business acceleration",
     "eic bas", "business acceleration service",
+    "eic transition", "eic pathfinder", "eic t2m",
+    "technology-to-market", "tech-to-market",
+    "exploitation of research", "exploitation of project results",
     "eurostars", "eureka cluster",
     "eit digital", "eit manufacturing", "eit health",
     "eit urban mobility", "eit food", "eit rawmaterials",
@@ -73,6 +111,9 @@ TIER1 = [
     "innovation management support", "innovation support services",
     "scale-up support", "scaleup support",
     "product-market fit", "market validation",
+    "commercialisation support", "commercialisation services",
+    "exploitation support", "exploitation services",
+    "innovation support", "innovation advisory",
 ]
 
 # ── Tier 2: Contextual terms — +3 per hit ────────────────────────
@@ -139,6 +180,33 @@ NEGATIVES = [
     "site design services", "web portal development", "e-learning platform",
     # Physical bridge / infrastructure (innovation partnership mechanism ≠ advisory)
     "bridge cover", "bridge deck", "procurement of a bridge",
+    # Actual R&D execution (not consultancy)
+    "design and execution of research", "implementation of research",
+    "development of software", "software development services",
+    "hardware development", "system integration",
+    "maritime network", "link integration network",
+    "cybersecurity research", "security score",
+    "protected area management", "marine observation",
+    # Open source software maintenance (Sovereign Tech Agency type)
+    "open source maintenance", "linux kernel", "open digital infrastructure",
+    "sovereign tech",
+    # Lab / life science execution (not commercialisation support)
+    "dna extraction", "sequencing", "genomics", "microbial", "cell culture",
+    "chromatography", "mass spectrometry", "laboratory equipment",
+    # Postal / logistics
+    "postal service", "postal services", "purchase of postal",
+    # Noise / environmental monitoring
+    "noise pollution", "noise software", "noise measurement",
+    # Apartment / housing defects
+    "apartment defect", "defects remediation", "building defect",
+    # Energy infrastructure (not cleantech commercialisation)
+    "energy lift", "grid connection works", "district heating",
+    # Ecological / environmental surveys (not innovation advisory)
+    "ecological survey", "habitat survey", "biodiversity survey",
+    "carbon certification", "blue carbon",
+    # Academic data collection / surveys
+    "web interviewing", "survey of elderly", "social mapping",
+    "questionnaire", "data collection survey",
 ]
 
 LIVE_TYPES  = {"cn-standard","cn-social","cn-desg","cn-tran",
@@ -168,9 +236,13 @@ def parse_deadline(raw):
     if isinstance(raw, dict): raw = next(iter(raw.values()), None)
     if not raw or not isinstance(raw, str): return None
     for fmt in ("%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%S.%f%z",
-                "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d"):
+                "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d%z", "%Y-%m-%d"):
         try:
-            dt = datetime.strptime(raw[:25], fmt)
+            # TED returns dates like "2026-06-05+02:00" — strip tz for date-only formats
+            s = raw[:25]
+            if fmt == "%Y-%m-%d%z" and len(raw) > 10:
+                s = raw  # keep full string for tz-aware date parse
+            dt = datetime.strptime(s, fmt)
             if dt.tzinfo is None:
                 dt = dt.replace(tzinfo=timezone.utc)
             return dt
@@ -179,7 +251,7 @@ def parse_deadline(raw):
     return None
 
 
-def score_notice(title: str, buyer: str, ntype: str):
+def score_notice(title: str, buyer: str, ntype: str, cpv_list: list = None):
     title_low = title.lower()
     text      = f"{title} {buyer}".lower()
     buyer_low = buyer.lower()
@@ -188,14 +260,16 @@ def score_notice(title: str, buyer: str, ntype: str):
     t1 = [t for t in TIER1 if t in text]
     t2 = [t for t in TIER2 if t in text]
     buyer_boost = 2 if any(sig in buyer_low for sig in BUYER_SIGNALS) else 0
-    sc = 7 * len(t1) + 3 * len(t2) + buyer_boost
+    cpv_hits    = [c for c in (cpv_list or []) if c in CPV_CODES]
+    cpv_boost   = 3 * len(cpv_hits)
+    sc = 7 * len(t1) + 3 * len(t2) + buyer_boost + cpv_boost
     if ntype in INTEL_TYPES: sc -= 5
     if sc < MIN_SCORE: return sc, "skip", t1, t2
-    if ntype in INTEL_TYPES:           bucket = "Market intelligence"
-    elif t1:                           bucket = "Live opportunity"
-    elif len(t2) >= 2 and buyer_boost: bucket = "Live opportunity"
-    elif len(t2) >= 3:                 bucket = "Possible opportunity"
-    else:                              bucket = "skip"
+    if ntype in INTEL_TYPES:                        bucket = "Market intelligence"
+    elif t1 or cpv_hits:                            bucket = "Live opportunity"
+    elif len(t2) >= 2 and (buyer_boost or cpv_hits): bucket = "Live opportunity"
+    elif len(t2) >= 3:                              bucket = "Possible opportunity"
+    else:                                           bucket = "skip"
     return sc, bucket, t1, t2
 
 
@@ -204,12 +278,20 @@ def extract(raw: dict) -> dict:
     title = flat(raw.get("notice-title"))       or "—"
     buyer = flat(raw.get("buyer-name"))         or "—"
     ntype = flat(raw.get("notice-type"))        or "—"
-    dl_dt = parse_deadline(raw.get("BT-13(t)-Part"))
+    dl_dt = (
+        parse_deadline(raw.get("deadline-receipt-tender-date-lot"))
+        or parse_deadline(raw.get("BT-131(d)-Lot"))
+        or parse_deadline(raw.get("deadline-date-lot"))
+        or parse_deadline(raw.get("BT-13(t)-Part"))
+    )
+    cpv_raw  = raw.get("classification-cpv") or []
+    cpv_list = list(dict.fromkeys(cpv_raw)) if isinstance(cpv_raw, list) else ([cpv_raw] if cpv_raw else [])
     return {
         "pub_num":     pub,
         "title":       title,
         "buyer":       buyer,
         "notice_type": ntype,
+        "cpv":         ", ".join(cpv_list[:4]),
         "deadline_dt": dl_dt,
         "deadline":    dl_dt.strftime("%Y-%m-%d") if dl_dt else "—",
         "link":        f"https://ted.europa.eu/en/notice/-/detail/{pub}" if pub != "—" else "",
@@ -219,10 +301,11 @@ def extract(raw: dict) -> dict:
 # STEP 1 — FETCH
 # ═══════════════════════════════════════════════════════════════
 
-def make_query():
-    parts = " OR ".join(f'FT ~ "{k}"' for k in BROAD_SEARCH_TERMS[:14])
-    since = (datetime.now() - timedelta(days=DAYS_BACK)).strftime("%Y%m%d")
-    return f"({parts}) AND publication-date >= {since}"
+def make_query(days_back=DAYS_BACK):
+    since    = (datetime.now() - timedelta(days=days_back)).strftime("%Y%m%d")
+    cpv_part = " OR ".join(f'classification-cpv = "{c}"' for c in CPV_CODES)
+    kw_part  = " OR ".join(f'FT ~ "{k}"' for k in BROAD_SEARCH_TERMS[:14])
+    return f"(({cpv_part}) OR ({kw_part})) AND publication-date >= {since}"
 
 
 def _fetch_page(payload) -> tuple:
@@ -252,10 +335,7 @@ def fetch(days_back: int = DAYS_BACK) -> tuple[pd.DataFrame, pd.DataFrame]:
     print(f"  Window: last {days_back} day(s)")
     print("=" * 64)
 
-    # Override DAYS_BACK if passed explicitly
-    since = (datetime.now() - timedelta(days=days_back)).strftime("%Y%m%d")
-    parts = " OR ".join(f'FT ~ "{k}"' for k in BROAD_SEARCH_TERMS[:14])
-    query = f"({parts}) AND publication-date >= {since}"
+    query = make_query(days_back)
     print(f"\nQuery:\n{query}\n")
     print("Fetching all pages...\n")
 
@@ -290,7 +370,8 @@ def fetch(days_back: int = DAYS_BACK) -> tuple[pd.DataFrame, pd.DataFrame]:
         if dt is None:             n_no_dl  += 1
         elif dt < DEADLINE_CUTOFF: n_expired += 1; continue
         else:                      n_future += 1
-        sc, bucket, t1, t2 = score_notice(e["title"], e["buyer"], e["notice_type"])
+        cpv_list = [c.strip() for c in e.get("cpv", "").split(",") if c.strip()]
+        sc, bucket, t1, t2 = score_notice(e["title"], e["buyer"], e["notice_type"], cpv_list)
         if bucket == "skip":
             if sc == -999: n_neg += 1
             else:          n_low += 1
@@ -433,6 +514,72 @@ def export(live: pd.DataFrame, intel: pd.DataFrame,
     return filename
 
 # ═══════════════════════════════════════════════════════════════
+# STEP 4 — SLACK DIGEST
+# ═══════════════════════════════════════════════════════════════
+
+def send_slack_digest(live: pd.DataFrame, intel: pd.DataFrame):
+    if not SLACK_WEBHOOK_URL:
+        print("No SLACK_WEBHOOK_URL set — skipping Slack digest.")
+        return
+
+    today = datetime.now().strftime("%Y-%m-%d")
+    deadline_cutoff = (datetime.now() + timedelta(days=DEADLINE_WARN_DAYS)).strftime("%Y-%m-%d")
+
+    blocks = [
+        {"type": "header", "text": {"type": "plain_text", "text": f"TED Tender Intelligence — {today}"}},
+        {"type": "section", "text": {"type": "mrkdwn", "text": (
+            f"*{len(live)}* live opportunities  |  "
+            f"*{len(intel)}* market intelligence entries"
+        )}},
+        {"type": "divider"},
+    ]
+
+    # Deadline-urgent notices first
+    if not live.empty and "deadline" in live.columns:
+        urgent = live[
+            (live["deadline"] != "—") &
+            (live["deadline"] <= deadline_cutoff) &
+            (live["deadline"] >= today)
+        ].sort_values("deadline")
+        if not urgent.empty:
+            blocks.append({"type": "section", "text": {"type": "mrkdwn",
+                "text": f":alarm_clock: *Deadlines within {DEADLINE_WARN_DAYS} days*"}})
+            for _, r in urgent.head(5).iterrows():
+                blocks.append({"type": "section", "text": {"type": "mrkdwn",
+                    "text": (
+                        f"*<{r.get('link','')}|{str(r['title'])[:80]}>*\n"
+                        f"Buyer: {r['buyer']}  |  Score: {r['score']}  |  Deadline: {r['deadline']}"
+                    )
+                }})
+
+    # Top live opportunities
+    if not live.empty:
+        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": ":green_circle: *Top Live Opportunities*"}})
+        for _, r in live.head(5).iterrows():
+            dl = r.get("deadline", "—")
+            blocks.append({"type": "section", "text": {"type": "mrkdwn",
+                "text": (
+                    f"*<{r.get('link','')}|{str(r['title'])[:80]}>*\n"
+                    f"Buyer: {r['buyer']}  |  Score: {r['score']}  |  Deadline: {dl}"
+                )
+            }})
+
+    blocks.append({"type": "divider"})
+    blocks.append({"type": "context", "elements": [
+        {"type": "mrkdwn", "text": "DevelopMinded TED Intelligence — automated daily fetch"}
+    ]})
+
+    try:
+        r = requests.post(SLACK_WEBHOOK_URL, json={"blocks": blocks}, timeout=15)
+        if r.status_code == 200:
+            print("Slack digest sent ✓")
+        else:
+            print(f"Slack error {r.status_code}: {r.text}")
+    except Exception as e:
+        print(f"Slack send failed: {e}")
+
+
+# ═══════════════════════════════════════════════════════════════
 # ENTRY POINT — called by GitHub Actions
 # ═══════════════════════════════════════════════════════════════
 
@@ -486,3 +633,4 @@ if __name__ == "__main__":
     # live = ai_filter(live)
     save_to_csv(live, intel)   # appends to ted_results.csv (committed to repo)
     export(live, intel)        # also writes ted_tenders.xlsx as backup artifact
+    send_slack_digest(live, intel)
