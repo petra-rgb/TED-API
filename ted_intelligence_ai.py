@@ -18,7 +18,7 @@ DEADLINE_CUTOFF = TODAY - timedelta(hours=24)
 
 SEARCH_URL        = "https://api.ted.europa.eu/v3/notices/search"
 CLAUDE_URL        = "https://api.anthropic.com/v1/messages"
-CLAUDE_MODEL      = "claude-haiku-4-5-20251001"
+CLAUDE_MODEL      = "claude-sonnet-4-6"
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 SLACK_WEBHOOK_URL = os.environ.get("SLACK_WEBHOOK_URL", "")
 
