@@ -32,9 +32,10 @@ def load_data():
         return pd.DataFrame()
 
 def load_reviews() -> dict:
-    """Returns {pub_num: status} e.g. {'123': 'In process of applying'}"""
     try:
         rv = pd.read_csv(REVIEWS_FILE)
+        if "status" not in rv.columns:
+            return {str(pn): "Reviewed" for pn in rv["pub_num"]}
         return dict(zip(rv["pub_num"].astype(str), rv["status"]))
     except FileNotFoundError:
         return {}
