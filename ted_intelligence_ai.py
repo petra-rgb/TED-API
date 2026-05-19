@@ -60,7 +60,19 @@ RESPONSE_FIELDS = [
     "deadline-date-lot",
     "BT-13(t)-Part",
 ]
+CPV_CODES = {
+    "73200000": "R&D consultancy services",
+    "79410000": "Business & mgmt consultancy",
+    "79411100": "Business development consultancy",
+    "79419000": "Evaluation consultancy",
+}
 
+BROAD_SEARCH_TERMS = [
+    "commercialisation", "valorisation", "market study", "market research",
+    "exploitation of results", "startup", "deep tech", "horizon europe",
+    "eic accelerator", "investor readiness", "investment readiness",
+    "go-to-market", "spin-off", "deeptech", "deep-tech",
+]
 INTEL_TYPES = {"can-standard", "can-social", "can-desg", "can-tran", "can-modif"}
 def flat(v) -> str:
     if not v: return ""
