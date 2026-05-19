@@ -24,6 +24,7 @@ jobs:
       - name: Run TED fetch
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         run: python ted_intelligence.py
  
       - name: Commit results back to repo
