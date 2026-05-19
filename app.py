@@ -79,7 +79,7 @@ else:
     # Remove internal columns from display
     display_cols = [c for c in
         ["score", "bucket", "deadline", "title", "buyer",
-         "notice_type", "t1_hits", "fetched_date", "link"]
+         "notice_type", "t1_hits", "fetched_date", "description", "value", "currency", "language","link"]
         if c in view.columns]
 
     st.caption(f"Showing {len(view)} of {len(live)} opportunities")
