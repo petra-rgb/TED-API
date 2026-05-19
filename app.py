@@ -37,7 +37,7 @@ def load_reviews() -> dict:
         if "status" not in rv.columns:
             return {str(pn): "Reviewed" for pn in rv["pub_num"]}
         return dict(zip(rv["pub_num"].astype(str), rv["status"]))
-    except FileNotFoundError:
+    except (FileNotFoundError, pd.errors.EmptyDataError):
         return {}
 
 def save_reviews(reviews: dict):
