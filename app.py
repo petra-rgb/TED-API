@@ -420,30 +420,14 @@ with tab4:
 
 # ── TAB 5: AI FILTERED ────────────────────────────────────────
 with tab5:
-    # File uploader — seed the tab with your local CSV today;
-    # once ted_results_ai.csv is committed, it loads automatically
-    uploaded = st.file_uploader(
-        "📂 Upload your ted_results_ai.csv (only needed until it's committed to the repo)",
-        type="csv",
-        key="ai_upload",
+    tab5_df = df_ai
+    ai_live_tab = (
+        tab5_df[tab5_df["bucket"].isin(["Live opportunity", "Possible opportunity"])].copy()
+        if not tab5_df.empty else pd.DataFrame()
     )
 
-    # Resolve which data to use: uploaded file > repo CSV
-    if uploaded is not None:
-        try:
-            tab5_df = pd.read_csv(uploaded)
-            tab5_df["fetched_date"] = pd.to_datetime(tab5_df["fetched_date"], errors="coerce")
-            if "value" in tab5_df.columns:
-                tab5_df["value"] = pd.to_numeric(tab5_df["value"], errors="coerce")
-            if "ai_reason" in tab5_df.columns:
-                tab5_df = tab5_df[
-                    ~tab5_df["ai_reason"].str.contains("429|API error|Max retries", na=False)
-                ]
-            st.success(f"✅ Loaded {len(tab5_df):,} rows from uploaded file — "
-                       f"commit `ted_results_ai.csv` to the repo to make this permanent.")
-        except Exception as e:
-            st.error(f"Could not read file: {e}")
-            tab5_df = df_ai
+    if tab5_df.empty:
+        st.info("No AI data yet. Commit `ted_results_ai.csv` to the repo and it will load automatically.")
     else:
         tab5_df = df_ai
 
