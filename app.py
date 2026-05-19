@@ -12,6 +12,7 @@ st.markdown("# 🔍 TED Tender Intelligence")
 st.caption("DevelopMinded — live EU procurement opportunities")
 
 CSV_FILE     = "ted_results.csv"
+AI_CSV_FILE  = "ted_results_ai.csv"
 REVIEWS_FILE = "reviews.csv"
 WARN_DAYS    = 14
 
@@ -31,6 +32,22 @@ def load_data():
     except FileNotFoundError:
         return pd.DataFrame()
 
+@st.cache_data(ttl=300)
+def load_ai_data():
+    try:
+        df = pd.read_csv(AI_CSV_FILE)
+        df["fetched_date"] = pd.to_datetime(df["fetched_date"], errors="coerce")
+        if "value" in df.columns:
+            df["value"] = pd.to_numeric(df["value"], errors="coerce")
+        if "score" in df.columns:
+            df["score"] = pd.to_numeric(df["score"], errors="coerce")
+        # Remove any rows that hit rate limits and were never actually evaluated
+        if "ai_reason" in df.columns:
+            df = df[~df["ai_reason"].str.contains("429|API error|Max retries", na=False)]
+        return df
+    except FileNotFoundError:
+        return pd.DataFrame()
+
 def load_reviews() -> dict:
     try:
         rv = pd.read_csv(REVIEWS_FILE)
@@ -45,7 +62,8 @@ def save_reviews(reviews: dict):
         {"pub_num": k, "status": v} for k, v in reviews.items()
     ]).to_csv(REVIEWS_FILE, index=False)
 
-df = load_data()
+df    = load_data()
+df_ai = load_ai_data()
 
 if df.empty:
     st.warning("No data yet. The daily fetch hasn't run or the CSV is missing.")
@@ -55,7 +73,7 @@ if df.empty:
 if "reviews" not in st.session_state:
     st.session_state.reviews = load_reviews()
 
-reviews = st.session_state.reviews   # shorthand
+reviews = st.session_state.reviews
 
 # ── Classify into display buckets ─────────────────────────────
 live_possible = df[df["bucket"].isin(["Live opportunity", "Possible opportunity"])].copy()
@@ -63,13 +81,18 @@ planning = live_possible[live_possible["deadline"] == "—"].copy()
 open_    = live_possible[live_possible["deadline"] != "—"].copy()
 closed   = df[df["bucket"] == "Market intelligence"].copy()
 
-# Reviewed = any notice that has been marked (from any bucket)
+# AI tab buckets
+ai_live = pd.DataFrame()
+if not df_ai.empty:
+    ai_lp    = df_ai[df_ai["bucket"].isin(["Live opportunity", "Possible opportunity"])].copy()
+    ai_live  = ai_lp.copy()
+
 reviewed_pubs    = set(reviews.keys())
 in_process_count = sum(1 for s in reviews.values() if s == "In process of applying")
 no_match_count   = sum(1 for s in reviews.values() if s == "Not a match")
 
 # ── Last updated ──────────────────────────────────────────────
-last_run = df["fetched_date"].max()
+last_run     = df["fetched_date"].max()
 last_run_str = last_run.strftime("%Y-%m-%d") if pd.notna(last_run) else "—"
 st.caption(f"Last updated: **{last_run_str}**")
 
@@ -83,13 +106,14 @@ open_deadlines = open_[
 
 urgent_count = len(open_deadlines[open_deadlines["deadline"] <= warn_cutoff])
 
-k1, k2, k3, k4, k5, k6 = st.columns(6)
-k1.metric("📋 Planning",            len(planning))
-k2.metric("🟢 Open",                len(open_))
-k3.metric("📁 Closed",              len(closed))
+k1, k2, k3, k4, k5, k6, k7 = st.columns(7)
+k1.metric("📋 Planning",              len(planning))
+k2.metric("🟢 Open",                  len(open_))
+k3.metric("📁 Closed",                len(closed))
 k4.metric(f"⏰ Deadline ≤{WARN_DAYS}d", urgent_count)
-k5.metric("🔄 In process",          in_process_count)
-k6.metric("✓ Reviewed",             len(reviewed_pubs))
+k5.metric("🤖 AI Relevant",           len(ai_live))
+k6.metric("🔄 In process",            in_process_count)
+k7.metric("✓ Reviewed",               len(reviewed_pubs))
 
 st.divider()
 
@@ -103,13 +127,10 @@ if "deadline" in open_.columns:
     if not urgent.empty:
         st.warning(f"⏰ {len(urgent)} opportunity/ies with deadline within {WARN_DAYS} days")
         for _, r in urgent.iterrows():
-            icon   = "🟢" if r["bucket"] == "Live opportunity" else "🟡"
-            link   = r.get("link", "")
-            title  = str(r["title"])[:90]
-            status = reviews.get(str(r["pub_num"]), "")
-            status_badge = f" · *{status}*" if status else ""
+            icon         = "🟢" if r["bucket"] == "Live opportunity" else "🟡"
+            status_badge = f" · *{reviews.get(str(r['pub_num']), '')}*" if str(r["pub_num"]) in reviews else ""
             st.markdown(
-                f"- {icon} **[{title}]({link})**{status_badge} "
+                f"- {icon} **[{str(r['title'])[:90]}]({r.get('link','')})**{status_badge} "
                 f"— deadline **{r['deadline']}** | score {r['score']}"
             )
         st.divider()
@@ -118,15 +139,15 @@ if "deadline" in open_.columns:
 with st.sidebar:
     st.markdown("## Filters")
     search    = st.text_input("🔍 Search title / buyer")
-    min_score = st.slider("Min score", 1, 30, 3)
+    min_score = st.slider("Min score", 0, 30, 0)
 
-    if "country" in df.columns:
-        country_opts = ["All"] + sorted(
-            df["country"].dropna().replace("", pd.NA).dropna().unique().tolist()
-        )
-        country_filt = st.selectbox("Country", country_opts)
-    else:
-        country_filt = "All"
+    all_countries = pd.concat([
+        df["country"] if "country" in df.columns else pd.Series(),
+        df_ai["country"] if not df_ai.empty and "country" in df_ai.columns else pd.Series(),
+    ]).dropna().replace("", pd.NA).dropna().unique().tolist()
+
+    country_opts = ["All"] + sorted(all_countries)
+    country_filt = st.selectbox("Country", country_opts)
 
     date_opts = ["All time"] + sorted(
         df["fetched_date"].dt.date.astype(str).unique().tolist(), reverse=True
@@ -146,9 +167,11 @@ with st.sidebar:
 
 # ── FILTER FUNCTION ───────────────────────────────────────────
 def apply_filters(view: pd.DataFrame) -> pd.DataFrame:
-    if view.empty:
-        return view
-    view = view[view["score"] >= min_score].copy()
+    if view.empty: return view
+    if "score" in view.columns:
+        view = view[view["score"] >= min_score].copy()
+    else:
+        view = view.copy()
     if search:
         mask = (
             view["title"].str.contains(search, case=False, na=False) |
@@ -161,14 +184,13 @@ def apply_filters(view: pd.DataFrame) -> pd.DataFrame:
         view = view[view["fetched_date"].dt.date.astype(str) == date_filt]
     if hide_reviewed:
         view = view[~view["pub_num"].astype(str).isin(reviewed_pubs)]
-    if sort_by == "Score (high→low)":
+    if sort_by == "Score (high→low)" and "score" in view.columns:
         view = view.sort_values("score", ascending=False)
     elif sort_by == "Newest fetch":
         view = view.sort_values("fetched_date", ascending=False)
     elif sort_by == "Deadline" and "deadline" in view.columns:
         view = view[view["deadline"] != "—"].sort_values("deadline")
     return view.reset_index(drop=True)
-
 # ── COLUMN CONFIGS ────────────────────────────────────────────
 def col_config_main(df):
     cfg = {
@@ -182,11 +204,11 @@ def col_config_main(df):
 
 def col_config_reviewed(df):
     cfg = {
-        "in_review":  st.column_config.CheckboxColumn("Keep", default=True, width="small"),
-        "status":     st.column_config.SelectboxColumn(
-                          "Status", options=STATUS_OPTIONS, default="Reviewed", width="medium"),
-        "link":       st.column_config.LinkColumn("Link", display_text="View ↗"),
-        "score":      st.column_config.NumberColumn("Score", format="%d ⭐"),
+        "in_review": st.column_config.CheckboxColumn("Keep", default=True, width="small"),
+        "status":    st.column_config.SelectboxColumn(
+                         "Status", options=STATUS_OPTIONS, default="Reviewed", width="medium"),
+        "link":      st.column_config.LinkColumn("Link", display_text="View ↗"),
+        "score":     st.column_config.NumberColumn("Score", format="%d ⭐"),
     }
     if "value" in df.columns:
         cfg["value"] = st.column_config.NumberColumn("Value", format="€%,.0f")
@@ -209,6 +231,11 @@ reviewed_cols = [c for c in
      "country", "value", "currency", "notice_type", "t1_hits", "description", "link"]
     if c in df.columns or c in ("in_review", "status")]
 
+ai_cols = [c for c in
+    ["reviewed", "score", "bucket", "deadline", "title", "buyer", "country",
+     "value", "currency", "ai_reason", "description", "link"]
+    if c in (df_ai.columns if not df_ai.empty else []) or c == "reviewed"]
+
 def prep_description(view: pd.DataFrame) -> pd.DataFrame:
     if "description" in view.columns:
         view = view.copy()
@@ -217,10 +244,10 @@ def prep_description(view: pd.DataFrame) -> pd.DataFrame:
         )
     return view
 
-# ── MAIN TABLE (with review checkbox) ────────────────────────
+# ── MAIN TABLE ────────────────────────────────────────────────
 def show_table(view: pd.DataFrame, cols: list, tab_key: str):
     if view.empty:
-        st.info("No notices match your filters. Try lowering the minimum score.")
+        st.info("No notices match your filters.")
         return
     view = view.copy()
     view["reviewed"] = view["pub_num"].astype(str).isin(reviewed_pubs)
@@ -235,26 +262,21 @@ def show_table(view: pd.DataFrame, cols: list, tab_key: str):
         key=f"editor_{tab_key}",
     )
 
-    # Apply checkbox changes
     if "reviewed" in edited.columns:
         pub_nums = view["pub_num"].astype(str).tolist()
-        changed = False
+        changed  = False
         for i, is_reviewed in enumerate(edited["reviewed"]):
-            if i >= len(pub_nums):
-                break
+            if i >= len(pub_nums): break
             pn = pub_nums[i]
-            was_reviewed = pn in reviews
-            if is_reviewed and not was_reviewed:
-                reviews[pn] = "Reviewed"
-                changed = True
-            elif not is_reviewed and was_reviewed:
-                del reviews[pn]
-                changed = True
+            if is_reviewed and pn not in reviews:
+                reviews[pn] = "Reviewed"; changed = True
+            elif not is_reviewed and pn in reviews:
+                del reviews[pn]; changed = True
         if changed:
             save_reviews(reviews)
             st.rerun()
 
-# ── REVIEWED TABLE (with status dropdown) ────────────────────
+# ── REVIEWED TABLE ────────────────────────────────────────────
 def show_reviewed_table(view: pd.DataFrame, tab_key: str):
     if view.empty:
         st.info("No reviewed notices yet. Check the ✓ box on any notice to move it here.")
@@ -273,32 +295,29 @@ def show_reviewed_table(view: pd.DataFrame, tab_key: str):
         key=f"editor_{tab_key}",
     )
 
-    # Apply status and removal changes
     if "status" in edited.columns or "in_review" in edited.columns:
         pub_nums = view["pub_num"].astype(str).tolist()
-        changed = False
+        changed  = False
         for i in range(len(edited)):
-            if i >= len(pub_nums):
-                break
-            pn  = pub_nums[i]
-            keep = edited["in_review"].iloc[i] if "in_review" in edited.columns else True
+            if i >= len(pub_nums): break
+            pn         = pub_nums[i]
+            keep       = edited["in_review"].iloc[i] if "in_review" in edited.columns else True
             new_status = edited["status"].iloc[i] if "status" in edited.columns else reviews.get(pn, "Reviewed")
             if not keep and pn in reviews:
-                del reviews[pn]
-                changed = True
+                del reviews[pn]; changed = True
             elif keep and new_status and reviews.get(pn) != new_status:
-                reviews[pn] = new_status
-                changed = True
+                reviews[pn] = new_status; changed = True
         if changed:
             save_reviews(reviews)
             st.rerun()
 
 # ── TABS ──────────────────────────────────────────────────────
-tab1, tab2, tab3, tab4 = st.tabs([
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
     f"📋 Planning ({len(planning)})",
     f"🟢 Open ({len(open_)})",
     f"📁 Closed ({len(closed)})",
     f"✓ Reviewed ({len(reviewed_pubs)})",
+    f"🤖 AI Filtered ({len(ai_live)})",
 ])
 
 # ── TAB 1: PLANNING ───────────────────────────────────────────
@@ -306,21 +325,16 @@ with tab1:
     view = apply_filters(planning)
     col_a, col_b = st.columns([3, 1])
     with col_a:
-        st.caption(
-            f"Showing **{len(view)}** of {len(planning)} planning notices "
-            f"— no submission deadline set (PIN / prior information notices)"
-        )
+        st.caption(f"Showing **{len(view)}** of {len(planning)} planning notices — no deadline set")
     with col_b:
         if not view.empty:
             st.download_button("⬇️ Download CSV",
                 data=view.to_csv(index=False).encode(),
                 file_name=f"ted_planning_{today}.csv", mime="text/csv")
-
     with st.expander("📊 Score distribution", expanded=False):
         if not view.empty:
-            bins = pd.cut(view["score"], bins=[0,6,9,14,100], labels=["4–6","7–9","10–14","15+"])
+            bins = pd.cut(view["score"], bins=[-1,3,6,9,14,100], labels=["0–3","4–6","7–9","10–14","15+"])
             st.bar_chart(bins.value_counts().sort_index().rename("notices"))
-
     show_table(view, base_cols, "planning")
 
 # ── TAB 2: OPEN ───────────────────────────────────────────────
@@ -334,12 +348,10 @@ with tab2:
             st.download_button("⬇️ Download CSV",
                 data=view.to_csv(index=False).encode(),
                 file_name=f"ted_open_{today}.csv", mime="text/csv")
-
     with st.expander("📊 Score distribution", expanded=False):
         if not view.empty:
-            bins = pd.cut(view["score"], bins=[0,6,9,14,100], labels=["4–6","7–9","10–14","15+"])
+            bins = pd.cut(view["score"], bins=[-1,3,6,9,14,100], labels=["0–3","4–6","7–9","10–14","15+"])
             st.bar_chart(bins.value_counts().sort_index().rename("notices"))
-
     show_table(view, base_cols, "open")
 
 # ── TAB 3: CLOSED ─────────────────────────────────────────────
@@ -364,13 +376,12 @@ with tab3:
 
         if "value" in view.columns and view["value"].notna().any():
             v1, v2, v3 = st.columns(3)
-            v1.metric("Avg contract value", f"€{view['value'].mean():,.0f}")
-            v2.metric("Max contract value", f"€{view['value'].max():,.0f}")
-            v3.metric("Total awarded value", f"€{view['value'].sum():,.0f}")
+            v1.metric("Avg contract value",   f"€{view['value'].mean():,.0f}")
+            v2.metric("Max contract value",   f"€{view['value'].max():,.0f}")
+            v3.metric("Total awarded value",  f"€{view['value'].sum():,.0f}")
             st.write("")
 
         show_table(view, intel_cols, "closed")
-
         if not view.empty:
             st.download_button("⬇️ Download CSV",
                 data=view.to_csv(index=False).encode(),
@@ -378,21 +389,14 @@ with tab3:
 
 # ── TAB 4: REVIEWED ───────────────────────────────────────────
 with tab4:
-    # Sub-filter by status
     status_filter = st.radio(
-        "Show",
-        ["All", "Reviewed", "In process of applying", "Not a match"],
+        "Show", ["All", "Reviewed", "In process of applying", "Not a match"],
         horizontal=True
     )
-
-    # Pull all reviewed notices from the main dataframe
     rev_df = df[df["pub_num"].astype(str).isin(reviewed_pubs)].copy()
-
     if not rev_df.empty:
         if status_filter != "All":
-            rev_df = rev_df[
-                rev_df["pub_num"].astype(str).map(reviews) == status_filter
-            ]
+            rev_df = rev_df[rev_df["pub_num"].astype(str).map(reviews) == status_filter]
         if search:
             mask = (
                 rev_df["title"].str.contains(search, case=False, na=False) |
@@ -402,21 +406,95 @@ with tab4:
         if country_filt != "All" and "country" in rev_df.columns:
             rev_df = rev_df[rev_df["country"] == country_filt]
 
-    # Summary counts
     c1, c2, c3 = st.columns(3)
-    c1.metric("🔵 Reviewed",              sum(1 for s in reviews.values() if s == "Reviewed"))
-    c2.metric("🔄 In process of applying", in_process_count)
-    c3.metric("❌ Not a match",             no_match_count)
+    c1.metric("🔵 Reviewed",               sum(1 for s in reviews.values() if s == "Reviewed"))
+    c2.metric("🔄 In process of applying",  in_process_count)
+    c3.metric("❌ Not a match",              no_match_count)
     st.write("")
-
-    st.caption(
-        "Change status using the **Status** dropdown. "
-        "Uncheck **Keep** to remove a notice from this list."
-    )
-
+    st.caption("Change status with the **Status** dropdown. Uncheck **Keep** to remove.")
     show_reviewed_table(rev_df, "reviewed")
-
     if not rev_df.empty:
         st.download_button("⬇️ Download CSV",
             data=rev_df.to_csv(index=False).encode(),
             file_name=f"ted_reviewed_{today}.csv", mime="text/csv")
+
+# ── TAB 5: AI FILTERED ────────────────────────────────────────
+with tab5:
+    # File uploader — seed the tab with your local CSV today;
+    # once ted_results_ai.csv is committed, it loads automatically
+    uploaded = st.file_uploader(
+        "📂 Upload your ted_results_ai.csv (only needed until it's committed to the repo)",
+        type="csv",
+        key="ai_upload",
+    )
+
+    # Resolve which data to use: uploaded file > repo CSV
+    if uploaded is not None:
+        try:
+            tab5_df = pd.read_csv(uploaded)
+            tab5_df["fetched_date"] = pd.to_datetime(tab5_df["fetched_date"], errors="coerce")
+            if "value" in tab5_df.columns:
+                tab5_df["value"] = pd.to_numeric(tab5_df["value"], errors="coerce")
+            if "ai_reason" in tab5_df.columns:
+                tab5_df = tab5_df[
+                    ~tab5_df["ai_reason"].str.contains("429|API error|Max retries", na=False)
+                ]
+            st.success(f"✅ Loaded {len(tab5_df):,} rows from uploaded file — "
+                       f"commit `ted_results_ai.csv` to the repo to make this permanent.")
+        except Exception as e:
+            st.error(f"Could not read file: {e}")
+            tab5_df = df_ai
+    else:
+        tab5_df = df_ai
+
+    ai_live_tab = (
+        tab5_df[tab5_df["bucket"].isin(["Live opportunity", "Possible opportunity"])].copy()
+        if not tab5_df.empty else pd.DataFrame()
+    )
+
+    if tab5_df.empty:
+        st.info(
+            "No AI data yet. Either upload your `ted_results_ai.csv` above, "
+            "or commit it to the repo and it will load automatically."
+        )
+    else:
+        ai_last = tab5_df["fetched_date"].max()
+        st.caption(
+            f"AI last run: **{ai_last.strftime('%Y-%m-%d') if pd.notna(ai_last) else '—'}** "
+            f"· Only notices Claude judged genuinely relevant for DevelopMinded"
+        )
+
+        view = apply_filters(ai_live_tab)
+
+        a1, a2, a3, a4 = st.columns(4)
+        a1.metric("📋 AI Planning", len(ai_live_tab[ai_live_tab["deadline"] == "—"]))
+        a2.metric("🟢 AI Open",     len(ai_live_tab[ai_live_tab["deadline"] != "—"]))
+        a3.metric("After filters",  len(view))
+        days_covered = (
+            (tab5_df["fetched_date"].max() - tab5_df["fetched_date"].min()).days + 1
+            if tab5_df["fetched_date"].notna().any() else 0
+        )
+        a4.metric("Days covered", days_covered)
+
+        col_a, col_b = st.columns([3, 1])
+        with col_b:
+            if not view.empty:
+                st.download_button("⬇️ Download CSV",
+                    data=view.to_csv(index=False).encode(),
+                    file_name=f"ted_ai_{today}.csv", mime="text/csv")
+
+        if not view.empty and "ai_reason" in view.columns:
+            with st.expander("💬 Claude's reasoning for top 10", expanded=False):
+                for _, r in view.head(10).iterrows():
+                    st.markdown(
+                        f"**{str(r['title'])[:90]}**  \n"
+                        f"_{r.get('ai_reason', '—')}_"
+                    )
+                    st.divider()
+
+        tab_ai_cols = [c for c in
+            ["reviewed", "deadline", "title", "buyer", "country",
+             "value", "currency", "ai_reason", "description", "link"]
+            if c in view.columns or c == "reviewed"]
+
+        show_table(view, tab_ai_cols, "ai_filtered")
