@@ -117,21 +117,43 @@ k7.metric("✓ Reviewed",               len(reviewed_pubs))
 
 st.divider()
 
+
 # ── DEADLINE ALERTS ───────────────────────────────────────────
 if "deadline" in open_.columns:
-    urgent = open_[
+    urgent_regular = open_[
         (open_["deadline"] != "—") &
         (open_["deadline"] <= warn_cutoff) &
         (open_["deadline"] >= today)
-    ].sort_values("deadline")
+    ].copy()
+    urgent_regular["source"] = "keyword"
+
+    urgent_ai = pd.DataFrame()
+    if not ai_live.empty and "deadline" in ai_live.columns:
+        urgent_ai = ai_live[
+            (ai_live["deadline"] != "—") &
+            (ai_live["deadline"] <= warn_cutoff) &
+            (ai_live["deadline"] >= today)
+        ].copy()
+        urgent_ai["source"] = "ai"
+
+    urgent = (
+        pd.concat([urgent_regular, urgent_ai], ignore_index=True)
+        .drop_duplicates(subset=["pub_num"])
+        .sort_values("deadline")
+    )
+
     if not urgent.empty:
         st.warning(f"⏰ {len(urgent)} opportunity/ies with deadline within {WARN_DAYS} days")
         for _, r in urgent.iterrows():
-            icon         = "🟢" if r["bucket"] == "Live opportunity" else "🟡"
+            is_ai        = r.get("source") == "ai"
+            icon         = "🤖" if is_ai else ("🟢" if r["bucket"] == "Live opportunity" else "🟡")
             status_badge = f" · *{reviews.get(str(r['pub_num']), '')}*" if str(r["pub_num"]) in reviews else ""
+            score_str    = f" | score {int(r['score'])}" if "score" in r and pd.notna(r.get("score")) else ""
+            ai_badge     = " · *AI verified*" if is_ai else ""
             st.markdown(
-                f"- {icon} **[{str(r['title'])[:90]}]({r.get('link','')})**{status_badge} "
-                f"— deadline **{r['deadline']}** | score {r['score']}"
+                f"- {icon} **[{str(r['title'])[:90]}]({r.get('link','')})**"
+                f"{status_badge}{ai_badge} "
+                f"— deadline **{r['deadline']}**{score_str}"
             )
         st.divider()
 
