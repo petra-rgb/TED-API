@@ -17,6 +17,7 @@ MAX_PAGES        = 999
 MIN_SCORE        = 4
 AI_MAX_NOTICES   = 20   # at current signal quality we rarely exceed 5–10 results
 AI_WORKERS       = 4
+SLACK_WEBHOOK_URL = os.environ.get("SLACK_WEBHOOK_URL", "")
 
 TODAY            = datetime.now(timezone.utc)
 DEADLINE_CUTOFF  = TODAY - timedelta(hours=24)
@@ -698,7 +699,97 @@ def save_to_csv(live: pd.DataFrame, intel: pd.DataFrame,
 
     combined.to_csv(csv_file, index=False)
     print(f"Saved → {csv_file}  ({len(combined):,} total rows, {len(new_rows)} new today)")
+def send_slack_digest(live: pd.DataFrame, intel: pd.DataFrame):
+    if not SLACK_WEBHOOK_URL:
+        print("No SLACK_WEBHOOK_URL set — skipping Slack digest.")
+        return
 
+    today           = datetime.now().strftime("%Y-%m-%d")
+    deadline_cutoff = (datetime.now() + timedelta(days=DEADLINE_WARN_DAYS)).strftime("%Y-%m-%d")
+
+    blocks = [
+        {
+            "type": "header",
+            "text": {"type": "plain_text", "text": f"🔍 TED Tender Intelligence — {today}"}
+        },
+        {
+            "type": "section",
+            "text": {"type": "mrkdwn", "text": (
+                f"*{len(live)}* live/possible opportunities  |  "
+                f"*{len(intel)}* awarded contracts"
+            )}
+        },
+        {"type": "divider"},
+    ]
+
+    urgent_pub_nums = set()
+
+    if not live.empty and "deadline" in live.columns:
+        urgent = live[
+            (live["deadline"] != "—") &
+            (live["deadline"] <= deadline_cutoff) &
+            (live["deadline"] >= today)
+        ].sort_values("deadline").head(5)
+
+        if not urgent.empty:
+            blocks.append({
+                "type": "section",
+                "text": {"type": "mrkdwn",
+                         "text": f":alarm_clock: *Deadlines within {DEADLINE_WARN_DAYS} days*"}
+            })
+            for _, r in urgent.iterrows():
+                urgent_pub_nums.add(r.get("pub_num", ""))
+                blocks.append({
+                    "type": "section",
+                    "text": {"type": "mrkdwn", "text": (
+                        f"*<{r.get('link','')}|{str(r['title'])[:80]}>*\n"
+                        f"Buyer: {r['buyer']}  |  Score: {r['score']}  |  "
+                        f"Deadline: *{r['deadline']}*"
+                    )}
+                })
+            blocks.append({"type": "divider"})
+
+    if not live.empty:
+        top = live[~live["pub_num"].isin(urgent_pub_nums)].head(5)
+        if not top.empty:
+            blocks.append({
+                "type": "section",
+                "text": {"type": "mrkdwn", "text": ":green_circle: *Top Opportunities*"}
+            })
+            for _, r in top.iterrows():
+                dl  = r.get("deadline", "—")
+                val = f"  |  €{r['value']:,.0f}" if pd.notna(r.get("value")) else ""
+                blocks.append({
+                    "type": "section",
+                    "text": {"type": "mrkdwn", "text": (
+                        f"*<{r.get('link','')}|{str(r['title'])[:80]}>*\n"
+                        f"Buyer: {r['buyer']}  |  Score: {r['score']}  |  "
+                        f"Deadline: {dl}{val}"
+                    )}
+                })
+
+    blocks.append({"type": "divider"})
+    blocks.append({
+        "type": "context",
+        "elements": [{"type": "mrkdwn",
+                      "text": "DevelopMinded TED Intelligence — automated daily fetch"}]
+    })
+
+    try:
+        r = requests.post(SLACK_WEBHOOK_URL, json={"blocks": blocks}, timeout=15)
+        if r.status_code == 200:
+            print("Slack digest sent ✓")
+        else:
+            print(f"Slack error {r.status_code}: {r.text}")
+    except Exception as e:
+        print(f"Slack send failed: {e}")
+
+
+if __name__ == "__main__":
+    live, intel = fetch()
+    save_to_csv(live, intel)
+    export(live, intel)
+    send_slack_digest(live, intel)
 if __name__ == "__main__":
     live, intel = fetch()
     if ANTHROPIC_API_KEY:
