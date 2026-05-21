@@ -12,81 +12,39 @@ st.logo("logo.png", size="large")
 
 st.markdown("""
 <style>
-    /* Main background — light grey */
-    .stApp {
-        background-color: #F2F2F2 !important;
-    }
+    .stApp { background-color: #F2F2F2 !important; }
+    [data-testid="stSidebar"] { background-color: #FFFFFF !important; }
 
-    /* Sidebar — pure white */
-    [data-testid="stSidebar"] {
-        background-color: #FFFFFF !important;
-    }
+    h1, h2, h3 { color: #F5C518 !important; }
+    [data-testid="stMetricLabel"] { color: #F5C518 !important; }
 
-    /* Header */
-    h1, h2, h3 {
-        color: #FF7A00 !important;
-    }
-
-    /* Metric labels */
-    [data-testid="stMetricLabel"] {
-        color: #FF7A00 !important;
-    }
-
-    /* Active tab */
     button[data-baseweb="tab"][aria-selected="true"] {
-        color: #FF7A00 !important;
-        border-bottom: 3px solid #FF7A00 !important;
+        color: #F5C518 !important;
+        border-bottom: 3px solid #F5C518 !important;
     }
-
-    /* Buttons */
     .stButton > button, .stDownloadButton > button {
-        background-color: #FF7A00 !important;
-        color: white !important;
+        background-color: #F5C518 !important;
+        color: #1A1A1A !important;
         border: none !important;
         border-radius: 6px !important;
     }
-
-    /* Slider */
     .stSlider [data-baseweb="slider"] [role="slider"] {
-        background-color: #FF7A00 !important;
+        background-color: #F5C518 !important;
     }
-
-    /* Links */
-    a {
-        color: #FF7A00 !important;
-    }
-
-    /* Body text — dark for readability */
-    .stApp, p, span, label {
-        color: #1A1A1A !important;
-    }
-        /* Card effect around main content */
+    a { color: #F5C518 !important; }
+    .stApp, p, span, label { color: #1A1A1A !important; }
     [data-testid="stDataEditor"] {
         border: 1px solid #E0E0E0 !important;
         border-radius: 8px !important;
     }
-
-    /* Stronger tab bar separator */
-    [data-testid="stTabs"] {
-        border-bottom: 2px solid #E0E0E0 !important;
-    }
-
-    /* Metric values bigger/bolder */
     [data-testid="stMetricValue"] {
         font-size: 2rem !important;
         font-weight: 700 !important;
         color: #1A1A1A !important;
     }
-
-    /* Deadline alert — more visible */
     [data-testid="stAlert"] {
-        border-left: 4px solid #FF7A00 !important;
-        background-color: #FFF4EC !important;
-    }
-
-    /* Caption text lighter */
-    [data-testid="stCaptionContainer"] {
-        color: #888888 !important;
+        border-left: 4px solid #F5C518 !important;
+        background-color: #FFFBE6 !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -359,7 +317,7 @@ def col_config_reviewed(df):
 
 # ── DISPLAY COLUMNS ───────────────────────────────────────────
 base_cols = [c for c in
-    ["reviewed", "score", "bucket", "deadline", "title", "buyer", "country",
+    ["reviewed", "score", "deadline", "title", "buyer", "country",
      "value", "currency", "duration", "languages",
      "notice_type", "t1_hits", "description", "link"]
     if c in df.columns or c == "reviewed"]
@@ -370,9 +328,10 @@ intel_cols = [c for c in
     if c in df.columns or c == "reviewed"]
 
 reviewed_cols = [c for c in
-    ["in_review", "status", "score", "bucket", "deadline", "title", "buyer",
+    ["in_review", "status", "score", "deadline", "title", "buyer",
      "country", "value", "currency", "notice_type", "t1_hits", "description", "link"]
     if c in df.columns or c in ("in_review", "status")]
+   
 
 
 def prep_description(view: pd.DataFrame) -> pd.DataFrame:
