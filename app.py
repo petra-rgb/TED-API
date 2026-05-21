@@ -443,12 +443,7 @@ with tab1:
             st.download_button(" Download CSV",
                 data=view.to_csv(index=False).encode(),
                 file_name=f"ted_planning_{today}.csv", mime="text/csv")
-    with st.expander(" Score distribution", expanded=False):
-        if not view.empty and "score" in view.columns:
-            scored = view["score"].dropna()
-            if not scored.empty:
-                bins = pd.cut(scored, bins=[-1,3,6,9,14,100], labels=["0–3","4–6","7–9","10–14","15+"])
-                st.bar_chart(bins.value_counts().sort_index().rename("notices"))
+   
     show_table(view, planning_cols, "planning")
 
 # ── TAB 2: OPEN ───────────────────────────────────────────────
@@ -464,12 +459,7 @@ with tab2:
             st.download_button("Download CSV",
                 data=view.to_csv(index=False).encode(),
                 file_name=f"ted_open_{today}.csv", mime="text/csv")
-    with st.expander(" Score distribution", expanded=False):
-        if not view.empty and "score" in view.columns:
-            scored = view["score"].dropna()
-            if not scored.empty:
-                bins = pd.cut(scored, bins=[-1,3,6,9,14,100], labels=["0–3","4–6","7–9","10–14","15+"])
-                st.bar_chart(bins.value_counts().sort_index().rename("notices"))
+   
     show_table(view, base_cols, "open")
 # ── TAB 3: CLOSED ─────────────────────────────────────────────
 with tab3:
