@@ -59,8 +59,12 @@ st.markdown("""
     }
 </style>
 """, unsafe_allow_html=True)
-st.logo("logo.png", size="large")          # shows in sidebar top-left
-
+col_logo, col_title = st.columns([1, 5])
+with col_logo:
+    st.image("logo.png", width=80)
+with col_title:
+    st.markdown("# 🔍 TED Tender Intelligence")
+    st.caption("DevelopMinded — live EU procurement opportunities")
 st.markdown("# 🔍 TED Tender Intelligence")
 st.caption("DevelopMinded — live EU procurement opportunities")
 
