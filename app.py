@@ -136,6 +136,15 @@ if not df_ai.empty:
 # Combined deduped counts (for KPIs only — tabs still show their own source)
 all_planning = pd.concat([planning, ai_planning]).drop_duplicates(subset=["pub_num"]) if not ai_planning.empty else planning
 all_open     = pd.concat([open_, ai_open_]).drop_duplicates(subset=["pub_num"]) if not ai_open_.empty else open_
+
+# Active counts — exclude past deadlines
+all_open_active = all_open[
+    (all_open["deadline"] == "—") | (all_open["deadline"] >= today)
+] if "deadline" in all_open.columns else all_open
+
+ai_live_active = ai_live[
+    (ai_live["deadline"] == "—") | (ai_live["deadline"] >= today)
+] if not ai_live.empty and "deadline" in ai_live.columns else ai_live
 # ── Last updated ──────────────────────────────────────────────
 last_run     = df["fetched_date"].max()
 last_run_str = last_run.strftime("%Y-%m-%d") if pd.notna(last_run) else "—"
@@ -154,10 +163,10 @@ no_match_count   = sum(1 for s in reviews.values() if s == "Not a match")
 urgent_count = len(open_deadlines[open_deadlines["deadline"] <= warn_cutoff])
 k1, k2, k3, k4, k5, k6, k7 = st.columns(7)
 k1.metric("Planning",              len(all_planning))
-k2.metric("Open",                  len(all_open))
+k2.metric("Open",                  len(all_open_active))
 k3.metric("Closed",                len(closed))
 k4.metric(f"Deadline ≤{WARN_DAYS}d", urgent_count)
-k5.metric("AI Relevant",           len(ai_live))
+k5.metric("AI Relevant",           len(ai_live_active))
 k6.metric("In process",            in_process_count)
 k7.metric("✓ Reviewed",               len(reviewed_pubs))
 
@@ -436,10 +445,10 @@ def show_reviewed_table(view: pd.DataFrame, tab_key: str):
 # ── TABS ──────────────────────────────────────────────────────
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
     f"Planning ({len(all_planning)})",   # ← was len(planning)
-    f"Open ({len(all_open)})",           # ← was len(open_)
+    f"Open ({len(all_open_active)})",           # ← was len(open_)
     f"Closed ({len(closed)})",
     f" Reviewed ({len(reviewed_pubs)})",
-    f" AI Filtered ({len(ai_live)})",
+    f" AI Filtered ({len(ai_live_active)})",
 ])
 
 # ── TAB 1: PLANNING ───────────────────────────────────────────
