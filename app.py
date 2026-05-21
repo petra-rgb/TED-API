@@ -405,7 +405,7 @@ def show_reviewed_table(view: pd.DataFrame, tab_key: str):
                              "Status", options=STATUS_OPTIONS, default="Reviewed", width="medium"),
             "notes":     st.column_config.TextColumn("Notes", width="large"),
             "link":      st.column_config.LinkColumn("Link", display_text="View ↗"),
-            "score":     st.column_config.NumberColumn("Score", format="%d ⭐"),
+            "score":     st.column_config.NumberColumn("Score", format="%d "),
             "value":     st.column_config.NumberColumn("Value", format="€%,.0f"),
         },
         disabled=[c for c in display_cols if c not in ("in_review", "status", "notes")],
@@ -466,6 +466,8 @@ with tab1:
 with tab2:
     combined_open, open_overlap = merge_sources(open_, ai_open_)
     view = apply_filters(combined_open)
+    if "deadline" in view.columns:
+        view = view[(view["deadline"] == "—") | (view["deadline"] >= today)].reset_index(drop=True)
 
     if not view.empty and "deadline" in view.columns:
         upcoming = view[view["deadline"] != "—"].copy()
@@ -579,6 +581,8 @@ with tab5:
         )
 
         view = apply_filters(ai_live_tab)
+        if "deadline" in view.columns:
+            view = view[(view["deadline"] == "—") | (view["deadline"] >= today)].reset_index(drop=True)
 
         a1, a2, a3, a4 = st.columns(4)
         a1.metric(" AI Planning", len(ai_live_tab[ai_live_tab["deadline"] == "—"]))
