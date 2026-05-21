@@ -253,10 +253,6 @@ reviewed_cols = [c for c in
      "country", "value", "currency", "notice_type", "t1_hits", "description", "link"]
     if c in df.columns or c in ("in_review", "status")]
 
-ai_cols = [c for c in
-    ["reviewed", "score", "bucket", "deadline", "title", "buyer", "country",
-     "value", "currency", "ai_reason", "description", "link"]
-    if c in (df_ai.columns if not df_ai.empty else []) or c == "reviewed"]
 
 def prep_description(view: pd.DataFrame) -> pd.DataFrame:
     if "description" in view.columns:
@@ -442,29 +438,12 @@ with tab4:
 
 # ── TAB 5: AI FILTERED ────────────────────────────────────────
 with tab5:
-    tab5_df = df_ai
-    ai_live_tab = (
-        tab5_df[tab5_df["bucket"].isin(["Live opportunity", "Possible opportunity"])].copy()
-        if not tab5_df.empty else pd.DataFrame()
-    )
-
-    if tab5_df.empty:
+    if df_ai.empty:
         st.info("No AI data yet. Commit `ted_results_ai.csv` to the repo and it will load automatically.")
     else:
-        tab5_df = df_ai
+        ai_live_tab = df_ai[df_ai["bucket"].isin(["Live opportunity", "Possible opportunity"])].copy()
 
-    ai_live_tab = (
-        tab5_df[tab5_df["bucket"].isin(["Live opportunity", "Possible opportunity"])].copy()
-        if not tab5_df.empty else pd.DataFrame()
-    )
-
-    if tab5_df.empty:
-        st.info(
-            "No AI data yet. Either upload your `ted_results_ai.csv` above, "
-            "or commit it to the repo and it will load automatically."
-        )
-    else:
-        ai_last = tab5_df["fetched_date"].max()
+        ai_last = df_ai["fetched_date"].max()
         st.caption(
             f"AI last run: **{ai_last.strftime('%Y-%m-%d') if pd.notna(ai_last) else '—'}** "
             f"· Only notices Claude judged genuinely relevant for DevelopMinded"
@@ -477,8 +456,8 @@ with tab5:
         a2.metric("🟢 AI Open",     len(ai_live_tab[ai_live_tab["deadline"] != "—"]))
         a3.metric("After filters",  len(view))
         days_covered = (
-            (tab5_df["fetched_date"].max() - tab5_df["fetched_date"].min()).days + 1
-            if tab5_df["fetched_date"].notna().any() else 0
+            (df_ai["fetched_date"].max() - df_ai["fetched_date"].min()).days + 1
+            if df_ai["fetched_date"].notna().any() else 0
         )
         a4.metric("Days covered", days_covered)
 
