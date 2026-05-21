@@ -230,10 +230,10 @@ if "deadline" in open_.columns:
     )
 
     if not urgent.empty:
-        st.warning(f"⏰ {len(urgent)} opportunity/ies with deadline within {WARN_DAYS} days")
+        st.warning(f"{len(urgent)} opportunity/ies with deadline within {WARN_DAYS} days")
         for _, r in urgent.iterrows():
             is_ai        = r.get("source") == "ai"
-            icon         = "🤖" if is_ai else ("🟢" if r["bucket"] == "Live opportunity" else "🟡")
+           
             status_badge = f" · *{reviews.get(str(r['pub_num']), '')}*" if str(r["pub_num"]) in reviews else ""
             score_str    = f" | score {int(r['score'])}" if "score" in r and pd.notna(r.get("score")) else ""
             ai_badge     = " · *AI verified*" if is_ai else ""
@@ -268,7 +268,7 @@ with st.sidebar:
     hide_reviewed = st.toggle("Hide reviewed", value=False)
 
     st.divider()
-    st.caption(f"🔄 {in_process_count} in process · ❌ {no_match_count} no match")
+   
     if st.button("Clear all reviews", type="secondary"):
         st.session_state.reviews = {}
         save_reviews({})
@@ -471,7 +471,7 @@ with tab1:
     view = apply_filters(combined_planning)
     col_a, col_b = st.columns([3, 1])
     with col_a:
-        overlap_note = f" · ⚠️ **{planning_overlap} appear in both** keyword + AI results" if planning_overlap else ""
+        overlap_note = f" ·  **{planning_overlap} appear in both** keyword + AI results" if planning_overlap else ""
         st.caption(f"Showing **{len(view)}** of {len(combined_planning)} planning notices — no deadline set{overlap_note}")
     with col_b:
         if not view.empty:
@@ -492,7 +492,7 @@ with tab2:
     view = apply_filters(combined_open)
     col_a, col_b = st.columns([3, 1])
     with col_a:
-        overlap_note = f" · ⚠️ **{open_overlap} appear in both** keyword + AI results" if open_overlap else ""
+        overlap_note = f" ·  **{open_overlap} appear in both** keyword + AI results" if open_overlap else ""
         st.caption(f"Showing **{len(view)}** of {len(combined_open)} open opportunities{overlap_note}")
     with col_b:
         if not view.empty:
