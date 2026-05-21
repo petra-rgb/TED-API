@@ -93,12 +93,13 @@ def load_reviews() -> tuple[dict, dict]:
 
 def save_reviews(reviews: dict, notes: dict):
     try:
-        _sb = create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
-        rows = [{"pub_num": k, "status": v, "notes": notes.get(k, "")} for k, v in reviews.items()]
-        _sb.table("reviews").upsert(rows).execute()
+        _sb.table("reviews").delete().neq("pub_num", "").execute()
+        if reviews:
+            rows = [{"pub_num": k, "status": v, "notes": notes.get(k, "")} 
+                    for k, v in reviews.items()]
+            _sb.table("reviews").insert(rows).execute()
     except Exception as e:
         st.warning(f"Could not save reviews: {e}")
-
 
 df    = load_data()
 df_ai = load_ai_data()
@@ -299,13 +300,13 @@ def prep_description(view: pd.DataFrame) -> pd.DataFrame:
     return view
 
 
-def col_config_main(df):
+def col_config_main(data):
     cfg = {
         "reviewed": st.column_config.CheckboxColumn("Done", default=False, width="small"),
         "link":     st.column_config.LinkColumn("Link", display_text="View"),
         "score":    st.column_config.NumberColumn("Score", format="%d"),
     }
-    if "value" in df.columns:
+    if "value" in data.columns:
         cfg["value"] = st.column_config.NumberColumn("Value", format="€%,.0f")
     return cfg
 
