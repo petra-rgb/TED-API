@@ -383,7 +383,7 @@ def show_table(view: pd.DataFrame, cols: list, tab_key: str):
             elif not is_reviewed and pn in reviews:
                 del reviews[pn]; changed = True
         if changed:
-            save_reviews(reviews)
+            save_reviews(reviews, notes)
             st.rerun()
 
 # ── REVIEWED TABLE ────────────────────────────────────────────
@@ -467,16 +467,21 @@ with tab2:
     combined_open, open_overlap = merge_sources(open_, ai_open_)
     view = apply_filters(combined_open)
 
-    # deadline timeline
-    if not view.empty and "deadline" in view.columns:
-        dl = view[view["deadline"] != "—"].copy()
-        if not dl.empty:
-            dl["deadline_dt"] = pd.to_datetime(dl["deadline"], errors="coerce")
-            dl = dl.dropna(subset=["deadline_dt"])
-            dl["week"] = dl["deadline_dt"].dt.to_period("W").dt.start_time.dt.strftime("%b %d")
-            weekly = dl.groupby("week").size().rename("deadlines")
-            st.caption("Deadlines by week")
-            st.bar_chart(weekly, height=150)
+   if not view.empty and "deadline" in view.columns:
+        upcoming = view[view["deadline"] != "—"].copy()
+        upcoming = upcoming[upcoming["deadline"] >= today].sort_values("deadline").head(5)
+    if not upcoming.empty:
+        st.caption("⏰ Next deadlines")
+        cols = st.columns(len(upcoming))
+        for i, (_, r) in enumerate(upcoming.iterrows()):
+            days_left = (pd.to_datetime(r["deadline"]) - pd.Timestamp.now()).days
+            cols[i].metric(
+                label=str(r["title"])[:40] + "…",
+                value=r["deadline"],
+                delta=f"{days_left}d left",
+                delta_color="inverse"
+            )
+        st.write("")
 
     # rest of tab 2 continues...
     col_a, col_b = st.columns([3, 1])
