@@ -9,11 +9,6 @@ st.set_page_config(
 )
 st.markdown("""
 <style>
-    /* Primary orange accent */
-    :root {
-        --primary: #FF7A00;
-    }
-
     /* Active tab */
     button[data-baseweb="tab"][aria-selected="true"] {
         color: #FF7A00 !important;
@@ -43,9 +38,19 @@ st.markdown("""
         color: #FF7A00 !important;
     }
 
-    /* Sidebar background */
+    /* Main background — white */
+    .stApp {
+        background-color: #FFFFFF !important;
+    }
+
+    /* Sidebar background — light grey */
     [data-testid="stSidebar"] {
-        background-color: #111111 !important;
+        background-color: #F5F5F5 !important;
+    }
+
+    /* Text — dark so it's readable on white */
+    .stApp, p, span, label {
+        color: #1A1A1A !important;
     }
 
     /* Header */
