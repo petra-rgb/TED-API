@@ -306,25 +306,22 @@ def merge_sources(kw_df: pd.DataFrame, ai_df: pd.DataFrame):
         return pd.DataFrame(), 0
     if kw_df.empty:
         out = ai_df.copy()
-        out["ai_tag"] = "🤖"
+        out["title"] = "🤖 " + out["title"].astype(str)
         return out, 0
     if ai_df.empty:
-        out = kw_df.copy()
-        out["ai_tag"] = ""
-        return out, 0
+        return kw_df.copy(), 0
 
     kw_pubs = set(kw_df["pub_num"].astype(str))
     ai_pubs = set(ai_df["pub_num"].astype(str))
     overlap  = kw_pubs & ai_pubs
 
     kw_out = kw_df.copy()
-    kw_out["ai_tag"] = kw_out["pub_num"].astype(str).apply(
-        lambda x: "🤖+" if x in ai_pubs else ""
-    )
+    # Mark keyword notices that also appear in AI results
+    kw_out.loc[kw_out["pub_num"].astype(str).isin(ai_pubs), "title"] = \
+        "🤖 " + kw_out.loc[kw_out["pub_num"].astype(str).isin(ai_pubs), "title"].astype(str)
 
     ai_only = ai_df[~ai_df["pub_num"].astype(str).isin(kw_pubs)].copy()
-    ai_only["ai_tag"] = "🤖"
-    # AI-only notices have no keyword score — blank is cleaner than 0
+    ai_only["title"] = "🤖 " + ai_only["title"].astype(str)
     if "score" in ai_only.columns:
         ai_only["score"] = pd.NA
 
