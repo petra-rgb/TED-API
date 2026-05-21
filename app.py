@@ -4,7 +4,7 @@ from datetime import datetime
 
 st.set_page_config(
     page_title="TED Intelligence — DevelopMinded",
-    page_icon="🔍",
+    page_icon="",
     layout="wide"
 )
 
@@ -91,7 +91,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.markdown("# 🔍 TED Tender Intelligence")
+st.markdown("# TED Tender Opportunities")
 st.caption("DevelopMinded — live EU procurement opportunities")
 
 CSV_FILE     = "ted_results.csv"
@@ -194,12 +194,12 @@ in_process_count = sum(1 for s in reviews.values() if s == "In process of applyi
 no_match_count   = sum(1 for s in reviews.values() if s == "Not a match")
 urgent_count = len(open_deadlines[open_deadlines["deadline"] <= warn_cutoff])
 k1, k2, k3, k4, k5, k6, k7 = st.columns(7)
-k1.metric("📋 Planning",              len(all_planning))
-k2.metric("🟢 Open",                  len(all_open))
-k3.metric("📁 Closed",                len(closed))
-k4.metric(f"⏰ Deadline ≤{WARN_DAYS}d", urgent_count)
-k5.metric("🤖 AI Relevant",           len(ai_live))
-k6.metric("🔄 In process",            in_process_count)
+k1.metric("Planning",              len(all_planning))
+k2.metric("Open",                  len(all_open))
+k3.metric("Closed",                len(closed))
+k4.metric(f"Deadline ≤{WARN_DAYS}d", urgent_count)
+k5.metric("AI Relevant",           len(ai_live))
+k6.metric("In process",            in_process_count)
 k7.metric("✓ Reviewed",               len(reviewed_pubs))
 
 st.divider()
@@ -342,7 +342,7 @@ def col_config_main(df):
         "reviewed": st.column_config.CheckboxColumn("✓", default=False, width="small"),
         "ai_tag":   st.column_config.TextColumn("AI", width="small"),
         "link":     st.column_config.LinkColumn("Link", display_text="View ↗"),
-        "score":    st.column_config.NumberColumn("Score", format="%d ⭐"),
+        "score":    st.column_config.NumberColumn("Score", format="%d "),
     }
     if "value" in df.columns:
         cfg["value"] = st.column_config.NumberColumn("Value", format="€%,.0f")
@@ -354,7 +354,7 @@ def col_config_reviewed(df):
         "status":    st.column_config.SelectboxColumn(
                          "Status", options=STATUS_OPTIONS, default="Reviewed", width="medium"),
         "link":      st.column_config.LinkColumn("Link", display_text="View ↗"),
-        "score":     st.column_config.NumberColumn("Score", format="%d ⭐"),
+        "score":     st.column_config.NumberColumn("Score", format="%d "),
     }
     if "value" in df.columns:
         cfg["value"] = st.column_config.NumberColumn("Value", format="€%,.0f")
@@ -458,11 +458,11 @@ def show_reviewed_table(view: pd.DataFrame, tab_key: str):
 
 # ── TABS ──────────────────────────────────────────────────────
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
-    f"📋 Planning ({len(all_planning)})",   # ← was len(planning)
-    f"🟢 Open ({len(all_open)})",           # ← was len(open_)
-    f"📁 Closed ({len(closed)})",
-    f"✓ Reviewed ({len(reviewed_pubs)})",
-    f"🤖 AI Filtered ({len(ai_live)})",
+    f"Planning ({len(all_planning)})",   # ← was len(planning)
+    f"Open ({len(all_open)})",           # ← was len(open_)
+    f"Closed ({len(closed)})",
+    f" Reviewed ({len(reviewed_pubs)})",
+    f" AI Filtered ({len(ai_live)})",
 ])
 
 # ── TAB 1: PLANNING ───────────────────────────────────────────
@@ -478,7 +478,7 @@ with tab1:
             st.download_button("⬇️ Download CSV",
                 data=view.to_csv(index=False).encode(),
                 file_name=f"ted_planning_{today}.csv", mime="text/csv")
-    with st.expander("📊 Score distribution", expanded=False):
+    with st.expander("Score distribution", expanded=False):
         if not view.empty and "score" in view.columns:
             scored = view["score"].dropna()
             if not scored.empty:
@@ -496,10 +496,10 @@ with tab2:
         st.caption(f"Showing **{len(view)}** of {len(combined_open)} open opportunities{overlap_note}")
     with col_b:
         if not view.empty:
-            st.download_button("⬇️ Download CSV",
+            st.download_button("Download CSV",
                 data=view.to_csv(index=False).encode(),
                 file_name=f"ted_open_{today}.csv", mime="text/csv")
-    with st.expander("📊 Score distribution", expanded=False):
+    with st.expander(" Score distribution", expanded=False):
         if not view.empty and "score" in view.columns:
             scored = view["score"].dropna()
             if not scored.empty:
@@ -535,7 +535,7 @@ with tab3:
 
         show_table(view, intel_cols, "closed")
         if not view.empty:
-            st.download_button("⬇️ Download CSV",
+            st.download_button("Download CSV",
                 data=view.to_csv(index=False).encode(),
                 file_name=f"ted_closed_{today}.csv", mime="text/csv")
 
@@ -559,14 +559,14 @@ with tab4:
             rev_df = rev_df[rev_df["country"] == country_filt]
 
     c1, c2, c3 = st.columns(3)
-    c1.metric("🔵 Reviewed",               sum(1 for s in reviews.values() if s == "Reviewed"))
-    c2.metric("🔄 In process of applying",  in_process_count)
-    c3.metric("❌ Not a match",              no_match_count)
+    c1.metric("Reviewed",               sum(1 for s in reviews.values() if s == "Reviewed"))
+    c2.metric("In process of applying",  in_process_count)
+    c3.metric(" Not a match",              no_match_count)
     st.write("")
     st.caption("Change status with the **Status** dropdown. Uncheck **Keep** to remove.")
     show_reviewed_table(rev_df, "reviewed")
     if not rev_df.empty:
-        st.download_button("⬇️ Download CSV",
+        st.download_button("Download CSV",
             data=rev_df.to_csv(index=False).encode(),
             file_name=f"ted_reviewed_{today}.csv", mime="text/csv")
 
@@ -586,8 +586,8 @@ with tab5:
         view = apply_filters(ai_live_tab)
 
         a1, a2, a3, a4 = st.columns(4)
-        a1.metric("📋 AI Planning", len(ai_live_tab[ai_live_tab["deadline"] == "—"]))
-        a2.metric("🟢 AI Open",     len(ai_live_tab[ai_live_tab["deadline"] != "—"]))
+        a1.metric(" AI Planning", len(ai_live_tab[ai_live_tab["deadline"] == "—"]))
+        a2.metric(" AI Open",     len(ai_live_tab[ai_live_tab["deadline"] != "—"]))
         a3.metric("After filters",  len(view))
         days_covered = (
             (df_ai["fetched_date"].max() - df_ai["fetched_date"].min()).days + 1
@@ -598,12 +598,12 @@ with tab5:
         col_a, col_b = st.columns([3, 1])
         with col_b:
             if not view.empty:
-                st.download_button("⬇️ Download CSV",
+                st.download_button("Download CSV",
                     data=view.to_csv(index=False).encode(),
                     file_name=f"ted_ai_{today}.csv", mime="text/csv")
 
         if not view.empty and "ai_reason" in view.columns:
-            with st.expander("💬 Claude's reasoning for top 10", expanded=False):
+            with st.expander("Claude's reasoning for top 10", expanded=False):
                 for _, r in view.head(10).iterrows():
                     st.markdown(
                         f"**{str(r['title'])[:90]}**  \n"
