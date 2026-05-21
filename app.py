@@ -7,6 +7,7 @@ st.set_page_config(
     page_icon="🔍",
     layout="wide"
 )
+st.logo("logo.png", size="large")          # shows in sidebar top-left
 
 st.markdown("# 🔍 TED Tender Intelligence")
 st.caption("DevelopMinded — live EU procurement opportunities")
