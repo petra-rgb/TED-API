@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
-
+from supabase import create_client
 st.set_page_config(page_title="Opportunity Search", layout="wide")
 st.logo("logo.png", size="large")
 
@@ -46,7 +46,6 @@ st.markdown("# Opportunity Search")
 
 CSV_FILE       = "ted_results.csv"
 AI_CSV_FILE    = "ted_results_ai.csv"
-REVIEWS_FILE   = "reviews.csv"
 WARN_DAYS      = 14
 STATUS_OPTIONS = ["Reviewed", "Not a match", "In process of applying"]
 
@@ -83,19 +82,22 @@ def load_ai_data():
 
 def load_reviews() -> tuple[dict, dict]:
     try:
-        rv = pd.read_csv(REVIEWS_FILE)
-        statuses = dict(zip(rv["pub_num"].astype(str), rv.get("status", pd.Series(["Reviewed"] * len(rv)))))
-        notes = dict(zip(rv["pub_num"].astype(str), rv["notes"].fillna(""))) if "notes" in rv.columns else {}
+        _sb = create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
+        rows = _sb.table("reviews").select("*").execute().data
+        statuses = {r["pub_num"]: r["status"] for r in rows}
+        notes    = {r["pub_num"]: r.get("notes", "") for r in rows}
         return statuses, notes
-    except (FileNotFoundError, pd.errors.EmptyDataError):
+    except Exception:
         return {}, {}
 
 
 def save_reviews(reviews: dict, notes: dict):
-    pd.DataFrame([
-        {"pub_num": k, "status": v, "notes": notes.get(k, "")}
-        for k, v in reviews.items()
-    ]).to_csv(REVIEWS_FILE, index=False)
+    try:
+        _sb = create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
+        rows = [{"pub_num": k, "status": v, "notes": notes.get(k, "")} for k, v in reviews.items()]
+        _sb.table("reviews").upsert(rows).execute()
+    except Exception as e:
+        st.warning(f"Could not save reviews: {e}")
 
 
 df    = load_data()
