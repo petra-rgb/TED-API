@@ -217,6 +217,34 @@ def apply_filters(view: pd.DataFrame) -> pd.DataFrame:
     elif sort_by == "Deadline" and "deadline" in view.columns:
         view = view[view["deadline"] != "—"].sort_values("deadline")
     return view.reset_index(drop=True)
+
+def merge_sources(kw_df: pd.DataFrame, ai_df: pd.DataFrame):
+    if kw_df.empty and ai_df.empty:
+        return pd.DataFrame(), 0
+    if kw_df.empty:
+        out = ai_df.copy(); out["source"] = "🤖 AI"; return out, 0
+    if ai_df.empty:
+        out = kw_df.copy(); out["source"] = "🔍 keyword"; return out, 0
+
+    kw_pubs = set(kw_df["pub_num"].astype(str))
+    ai_pubs = set(ai_df["pub_num"].astype(str))
+    overlap  = kw_pubs & ai_pubs
+
+    kw_out = kw_df.copy()
+    kw_out["source"] = kw_out["pub_num"].astype(str).apply(
+        lambda x: "🔍+🤖 both" if x in ai_pubs else "🔍 keyword"
+    )
+    ai_only = ai_df[~ai_df["pub_num"].astype(str).isin(kw_pubs)].copy()
+    ai_only["source"] = "🤖 AI"
+
+    return pd.concat([kw_out, ai_only], ignore_index=True), len(overlap)
+
+base_cols = [c for c in
+    ["reviewed", "source", "score", "bucket", "deadline", "title", "buyer", "country",
+     "value", "currency", "duration", "languages",
+     "notice_type", "t1_hits", "description", "link"]
+    if c in df.columns or c in ("reviewed", "source")]
+    
 # ── COLUMN CONFIGS ────────────────────────────────────────────
 def col_config_main(df):
     cfg = {
@@ -344,38 +372,41 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
 
 # ── TAB 1: PLANNING ───────────────────────────────────────────
 with tab1:
-    view = apply_filters(planning)
+    combined_planning, planning_overlap = merge_sources(planning, ai_planning)
+    view = apply_filters(combined_planning)
     col_a, col_b = st.columns([3, 1])
     with col_a:
-        st.caption(f"Showing **{len(view)}** of {len(planning)} planning notices — no deadline set")
+        overlap_note = f" · ⚠️ **{planning_overlap} appear in both** keyword + AI results" if planning_overlap else ""
+        st.caption(f"Showing **{len(view)}** of {len(combined_planning)} planning notices — no deadline set{overlap_note}")
     with col_b:
         if not view.empty:
             st.download_button("⬇️ Download CSV",
                 data=view.to_csv(index=False).encode(),
                 file_name=f"ted_planning_{today}.csv", mime="text/csv")
     with st.expander("📊 Score distribution", expanded=False):
-        if not view.empty:
+        if not view.empty and "score" in view.columns:
             bins = pd.cut(view["score"], bins=[-1,3,6,9,14,100], labels=["0–3","4–6","7–9","10–14","15+"])
             st.bar_chart(bins.value_counts().sort_index().rename("notices"))
     show_table(view, base_cols, "planning")
 
 # ── TAB 2: OPEN ───────────────────────────────────────────────
 with tab2:
-    view = apply_filters(open_)
+    combined_open, open_overlap = merge_sources(open_, ai_open_)
+    view = apply_filters(combined_open)
     col_a, col_b = st.columns([3, 1])
     with col_a:
-        st.caption(f"Showing **{len(view)}** of {len(open_)} open opportunities")
+        overlap_note = f" · ⚠️ **{open_overlap} appear in both** keyword + AI results" if open_overlap else ""
+        st.caption(f"Showing **{len(view)}** of {len(combined_open)} open opportunities{overlap_note}")
     with col_b:
         if not view.empty:
             st.download_button("⬇️ Download CSV",
                 data=view.to_csv(index=False).encode(),
                 file_name=f"ted_open_{today}.csv", mime="text/csv")
     with st.expander("📊 Score distribution", expanded=False):
-        if not view.empty:
+        if not view.empty and "score" in view.columns:
             bins = pd.cut(view["score"], bins=[-1,3,6,9,14,100], labels=["0–3","4–6","7–9","10–14","15+"])
             st.bar_chart(bins.value_counts().sort_index().rename("notices"))
     show_table(view, base_cols, "open")
-
 # ── TAB 3: CLOSED ─────────────────────────────────────────────
 with tab3:
     if closed.empty:
