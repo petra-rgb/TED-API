@@ -51,51 +51,41 @@ STATUS_OPTIONS = ["Reviewed", "Not a match", "In process of applying"]
 
 
 @st.cache_data(ttl=300)
-def load_data():
+def load_csv_data(file_path: str) -> pd.DataFrame:
     try:
-        df = pd.read_csv(CSV_FILE)
+        df = pd.read_csv(file_path)
         df["fetched_date"] = pd.to_datetime(df["fetched_date"], errors="coerce")
-        if "value" in df.columns:
-            df["value"] = pd.to_numeric(df["value"], errors="coerce")
-        if "score" in df.columns:
-            df["score"] = pd.to_numeric(df["score"], errors="coerce")
+        for col in ["value", "score"]:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors="coerce")
         return df
     except FileNotFoundError:
         return pd.DataFrame()
 
+df    = load_csv_data(CSV_FILE)
+df_ai = load_csv_data(AI_CSV_FILE)
 
-@st.cache_data(ttl=300)
-def load_ai_data():
+# filter bad AI rows after loading
+if not df_ai.empty and "ai_reason" in df_ai.columns:
+    df_ai = df_ai[~df_ai["ai_reason"].str.contains("429|API error|Max retries", na=False)]
+
+_sb = create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
+
+def load_reviews(_sb) -> tuple[dict, dict]:
     try:
-        df = pd.read_csv(AI_CSV_FILE)
-        df["fetched_date"] = pd.to_datetime(df["fetched_date"], errors="coerce")
-        if "value" in df.columns:
-            df["value"] = pd.to_numeric(df["value"], errors="coerce")
-        if "score" in df.columns:
-            df["score"] = pd.to_numeric(df["score"], errors="coerce")
-        if "ai_reason" in df.columns:
-            df = df[~df["ai_reason"].str.contains("429|API error|Max retries", na=False)]
-        return df
-    except FileNotFoundError:
-        return pd.DataFrame()
-
-
-def load_reviews() -> tuple[dict, dict]:
-    try:
-        _sb = create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
-        rows = _sb.table("reviews").select("*").execute().data
+        rows     = _sb.table("reviews").select("*").execute().data
         statuses = {r["pub_num"]: r["status"] for r in rows}
         notes    = {r["pub_num"]: r.get("notes", "") for r in rows}
         return statuses, notes
-    except Exception:
+    except Exception as e:
+        st.error(f"Could not load reviews: {e}")
         return {}, {}
 
-
-def save_reviews(reviews: dict, notes: dict):
+def save_reviews(_sb, reviews: dict, notes: dict):
     try:
         _sb.table("reviews").delete().neq("pub_num", "").execute()
         if reviews:
-            rows = [{"pub_num": k, "status": v, "notes": notes.get(k, "")} 
+            rows = [{"pub_num": k, "status": v, "notes": notes.get(k, "")}
                     for k, v in reviews.items()]
             _sb.table("reviews").insert(rows).execute()
     except Exception as e:
@@ -109,7 +99,7 @@ if df.empty:
     st.stop()
 
 if "reviews" not in st.session_state or "notes" not in st.session_state:
-    st.session_state.reviews, st.session_state.notes = load_reviews()
+    st.session_state.reviews, st.session_state.notes = load_reviews(_sb)
 
 reviews = st.session_state.reviews
 notes   = st.session_state.notes
@@ -228,7 +218,7 @@ with st.sidebar:
     if st.button("Clear all reviews", type="secondary"):
         st.session_state.reviews = {}
         st.session_state.notes   = {}
-        save_reviews({}, {})
+        save_reviews(_sb, {}, {})
         st.rerun()
 
 
@@ -366,7 +356,7 @@ def show_table(view: pd.DataFrame, cols: list, tab_key: str):
                 del reviews[pn]
                 changed = True
         if changed:
-            save_reviews(reviews, notes)
+            save_reviews(_sb, reviews, notes)
             st.rerun()
 
 
@@ -417,7 +407,7 @@ def show_reviewed_table(view: pd.DataFrame, tab_key: str):
                 notes[pn] = new_note or ""
                 changed = True
     if changed:
-        save_reviews(reviews, notes)
+        save_reviews(_sb, reviews, notes)
         st.rerun()
 
 
