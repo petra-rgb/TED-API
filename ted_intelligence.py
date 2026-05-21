@@ -2,7 +2,7 @@
 import requests, time, os
 import pandas as pd
 from datetime import datetime, timedelta, timezone
-from concurrent.futures import ThreadPoolExecutor, as_completed
+
 
 # ═══════════════════════════════════════════════════════════════
 # CONFIGURATION
@@ -11,39 +11,15 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 DAYS_BACK          = int(os.environ.get("DAYS_BACK", "1"))
 PAGE_SIZE          = 250
 MAX_PAGES          = 999
-MIN_SCORE          = 4
-AI_MAX_NOTICES     = 20
-AI_WORKERS         = 4
-DEADLINE_WARN_DAYS = 7
+MIN_SCORE          = 3
+DEADLINE_WARN_DAYS = 14
 
 TODAY           = datetime.now(timezone.utc)
 DEADLINE_CUTOFF = TODAY - timedelta(hours=24)
 
 SEARCH_URL        = "https://api.ted.europa.eu/v3/notices/search"
-CLAUDE_URL        = "https://api.anthropic.com/v1/messages"
-CLAUDE_MODEL      = "claude-sonnet-4-20250514"
-ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 SLACK_WEBHOOK_URL = os.environ.get("SLACK_WEBHOOK_URL", "")
 
-DM_PROFILE = """
-DevelopMinded is a technology commercialisation consultancy that supports deep tech spinouts,
-EIC/Horizon Europe grantees, and research-based ventures. Our core services are:
-- Technology commercialisation and exploitation of research results
-- Go-to-market strategy and market intelligence (market sizing, segmentation, competitive analysis)
-- Investment readiness and fundraising support (pitch decks, financial modelling, investor targeting)
-- EU tender bid preparation (e.g. HADEA, EIC, Horizon Europe procurements)
-- Partnership strategy and stakeholder outreach
-- Regulatory pathway analysis for market entry
-- Talent strategy and HR roadmap for scaling ventures
-
-Ideal clients: EIC Accelerator / EIC Transition / EIC Pathfinder grantees, university spinouts,
-deep tech companies (biotech, medtech, cleantech, agtech, defence tech) at TRL 4-7 needing
-commercial and strategic support to reach the market.
-
-NOT relevant: running clinical trials, lab/research execution, software development,
-infrastructure/construction management, policy research, academic surveys, open source
-maintenance, ecological studies, or procurements for physical goods/equipment.
-"""
 
 RESPONSE_FIELDS = [
     "publication-number",
@@ -68,11 +44,13 @@ CPV_CODES = {
     "79410000": "Business & mgmt consultancy",
     "79411100": "Business development consultancy",
     "79419000": "Evaluation consultancy",
+    
 }
 
 CPV_PREFIXES = {
     "7320":  "R&D consultancy",
     "79410": "Business & mgmt consultancy",
+    
 }
 
 BROAD_SEARCH_TERMS = [
@@ -91,6 +69,9 @@ BROAD_SEARCH_TERMS = [
     "spin-off",
     "deeptech",
     "deep-tech",
+    "knowledge valorisation",      # ← add
+    "pre-commercial",              # ← add (catches PCP, pre-commercial procurement)
+    "deep tech",  
 ]
 
 TIER1 = [
@@ -465,82 +446,9 @@ def fetch(days_back: int = DAYS_BACK) -> tuple[pd.DataFrame, pd.DataFrame]:
     return live, intel
 
 
-# ═══════════════════════════════════════════════════════════════
-# STEP 2 — AI FILTER
-# ═══════════════════════════════════════════════════════════════
-
-def _ask_claude(title: str, buyer: str, notice_text: str) -> tuple[bool, str]:
-    if not ANTHROPIC_API_KEY:
-        return True, "No API key — kept"
-    prompt = f"""You are evaluating whether a public procurement tender is relevant for DevelopMinded.
-
-{DM_PROFILE}
-
-TENDER TITLE: {title}
-BUYER: {buyer}
-NOTICE TEXT:
-{notice_text or "(not available — judge on title and buyer only)"}
-
-Is this tender genuinely relevant for DevelopMinded?
-Answer in exactly this format:
-RELEVANT: YES or NO
-REASON: one sentence"""
-    try:
-        r = requests.post(
-            CLAUDE_URL,
-            headers={
-                "x-api-key":         ANTHROPIC_API_KEY,
-                "anthropic-version": "2023-06-01",
-                "content-type":      "application/json",
-            },
-            json={"model": CLAUDE_MODEL, "max_tokens": 150,
-                  "messages": [{"role": "user", "content": prompt}]},
-            timeout=30,
-        )
-        if r.status_code != 200: return True, f"API error {r.status_code} — kept"
-        text     = r.json()["content"][0]["text"].strip()
-        relevant = "RELEVANT: YES" in text.upper()
-        reason   = next((l[7:].strip() for l in text.split("\n")
-                         if l.upper().startswith("REASON:")), "")
-        return relevant, reason
-    except Exception as e:
-        return True, f"Error: {e} — kept"
-
-
-def _check_one(row: dict) -> dict:
-    # Uses description already fetched from TED API — no extra HTTP request
-    notice_text = row.get("description", "") or ""
-    rel, why    = _ask_claude(row.get("title", ""), row.get("buyer", ""), notice_text)
-    return {**row, "ai_relevant": rel, "ai_reason": why}
-
-
-def ai_filter(live: pd.DataFrame, max_notices: int = AI_MAX_NOTICES) -> pd.DataFrame:
-    if live.empty: print("Nothing to filter."); return live
-    to_check = live.head(max_notices)
-    print(f"\n{'='*64}")
-    print(f"AI filter — checking {len(to_check)} notices")
-    print("=" * 64 + "\n")
-    rows, results = to_check.to_dict("records"), []
-    with ThreadPoolExecutor(max_workers=AI_WORKERS) as pool:
-        futures = {pool.submit(_check_one, r): i for i, r in enumerate(rows)}
-        done = 0
-        for fut in as_completed(futures):
-            res = fut.result(); done += 1
-            icon = "✅" if res["ai_relevant"] else "❌"
-            print(f"  [{done:2d}/{len(rows)}] {icon}  {str(res.get('title',''))[:65]}")
-            results.append(res)
-    df      = pd.DataFrame(results)
-    kept    = df[df["ai_relevant"]].sort_values("score", ascending=False).reset_index(drop=True)
-    removed = df[~df["ai_relevant"]]
-    print(f"\n✅ Kept {len(kept)}  |  ❌ Removed {len(removed)}")
-    if not removed.empty:
-        for _, r in removed.iterrows():
-            print(f"  ❌ {str(r['title'])[:70]}\n     → {r['ai_reason']}")
-    return kept
-
 
 # ═══════════════════════════════════════════════════════════════
-# STEP 3 — EXPORT
+# STEP 2 — EXPORT
 # ═══════════════════════════════════════════════════════════════
 
 def export(live: pd.DataFrame, intel: pd.DataFrame,
@@ -548,7 +456,7 @@ def export(live: pd.DataFrame, intel: pd.DataFrame,
     if live.empty and intel.empty: print("Nothing to export."); return
     live_cols  = ["score", "bucket", "deadline", "title", "buyer", "country",
                   "value", "currency", "duration", "languages",
-                  "notice_type", "t1_hits", "t2_hits", "ai_reason", "description", "link"]
+                  "notice_type", "t1_hits", "t2_hits", "description", "link"]
     intel_cols = ["score", "deadline", "title", "buyer", "country",
                   "value", "currency", "notice_type", "t1_hits", "link"]
     with pd.ExcelWriter(filename, engine="openpyxl") as w:
@@ -570,7 +478,7 @@ def export(live: pd.DataFrame, intel: pd.DataFrame,
 
 
 # ═══════════════════════════════════════════════════════════════
-# STEP 4 — SAVE TO CSV
+# STEP 3 — SAVE TO CSV
 # ═══════════════════════════════════════════════════════════════
 
 def save_to_csv(live: pd.DataFrame, intel: pd.DataFrame,
@@ -603,7 +511,7 @@ def save_to_csv(live: pd.DataFrame, intel: pd.DataFrame,
 
 
 # ═══════════════════════════════════════════════════════════════
-# STEP 5 — SLACK DIGEST
+# STEP 4 — SLACK DIGEST
 # ═══════════════════════════════════════════════════════════════
 
 def send_slack_digest(live: pd.DataFrame, intel: pd.DataFrame):
@@ -682,8 +590,6 @@ def send_slack_digest(live: pd.DataFrame, intel: pd.DataFrame):
 
 if __name__ == "__main__":
     live, intel = fetch()
-    if ANTHROPIC_API_KEY:
-        live = ai_filter(live)
     save_to_csv(live, intel)
     export(live, intel)
     send_slack_digest(live, intel)
