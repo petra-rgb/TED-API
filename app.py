@@ -249,6 +249,7 @@ base_cols = [c for c in
 def col_config_main(df):
     cfg = {
         "reviewed": st.column_config.CheckboxColumn("✓", default=False, width="small"),
+        "source":   st.column_config.TextColumn("Source", width="small"),   # ← add this
         "link":     st.column_config.LinkColumn("Link", display_text="View ↗"),
         "score":    st.column_config.NumberColumn("Score", format="%d ⭐"),
     }
@@ -363,8 +364,8 @@ def show_reviewed_table(view: pd.DataFrame, tab_key: str):
 
 # ── TABS ──────────────────────────────────────────────────────
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
-    f"📋 Planning ({len(planning)})",
-    f"🟢 Open ({len(open_)})",
+    f"📋 Planning ({len(all_planning)})",   # ← was len(planning)
+    f"🟢 Open ({len(all_open)})",           # ← was len(open_)
     f"📁 Closed ({len(closed)})",
     f"✓ Reviewed ({len(reviewed_pubs)})",
     f"🤖 AI Filtered ({len(ai_live)})",
