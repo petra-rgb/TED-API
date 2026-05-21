@@ -4,11 +4,12 @@ from datetime import datetime
 
 st.set_page_config(
     page_title="TED Intelligence — DevelopMinded",
-    page_icon="",
     layout="wide"
 )
 
 st.logo("logo.png", size="large")
+
+new_today = st.toggle(" New today only", value=False)
 
 st.markdown("""
 <style>
@@ -50,7 +51,6 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.markdown("# TED Tender Opportunities")
-st.caption("DevelopMinded — live EU procurement opportunities")
 
 CSV_FILE     = "ted_results.csv"
 AI_CSV_FILE  = "ted_results_ai.csv"
@@ -89,18 +89,19 @@ def load_ai_data():
     except FileNotFoundError:
         return pd.DataFrame()
 
-def load_reviews() -> dict:
+def load_reviews() -> tuple[dict, dict]:
     try:
         rv = pd.read_csv(REVIEWS_FILE)
-        if "status" not in rv.columns:
-            return {str(pn): "Reviewed" for pn in rv["pub_num"]}
-        return dict(zip(rv["pub_num"].astype(str), rv["status"]))
+        statuses = dict(zip(rv["pub_num"].astype(str), rv.get("status", pd.Series(["Reviewed"]*len(rv)))))
+        notes = dict(zip(rv["pub_num"].astype(str), rv["notes"].fillna(""))) if "notes" in rv.columns else {}
+        return statuses, notes
     except (FileNotFoundError, pd.errors.EmptyDataError):
-        return {}
+        return {}, {}
 
-def save_reviews(reviews: dict):
+def save_reviews(reviews: dict, notes: dict):
     pd.DataFrame([
-        {"pub_num": k, "status": v} for k, v in reviews.items()
+        {"pub_num": k, "status": v, "notes": notes.get(k, "")}
+        for k, v in reviews.items()
     ]).to_csv(REVIEWS_FILE, index=False)
 
 df    = load_data()
@@ -111,11 +112,11 @@ if df.empty:
     st.stop()
 
 # ── Session state ─────────────────────────────────────────────
-if "reviews" not in st.session_state:
-    st.session_state.reviews = load_reviews()
+if "reviews" not in st.session_state or "notes" not in st.session_state:
+    st.session_state.reviews, st.session_state.notes = load_reviews()
 
 reviews = st.session_state.reviews
-
+notes   = st.session_state.notes
 # ── Classify into display buckets ─────────────────────────────
 live_possible = df[df["bucket"].isin(["Live opportunity", "Possible opportunity"])].copy()
 planning = live_possible[live_possible["deadline"] == "—"].copy()
@@ -205,7 +206,7 @@ if "deadline" in open_.columns:
 # ── SIDEBAR ───────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("## Filters")
-    search    = st.text_input("🔍 Search title / buyer")
+    search    = st.text_input(" Search title / buyer")
     min_score = st.slider("Min score", 0, 30, 0)
 
     all_countries = pd.concat([
@@ -229,7 +230,8 @@ with st.sidebar:
    
     if st.button("Clear all reviews", type="secondary"):
         st.session_state.reviews = {}
-        save_reviews({})
+        st.session_state.notes   = {}
+        save_reviews({}, {})
         st.rerun()
 
 # ── FILTER FUNCTION ───────────────────────────────────────────
@@ -245,6 +247,9 @@ def apply_filters(view: pd.DataFrame) -> pd.DataFrame:
             view["buyer"].str.contains(search, case=False, na=False)
         )
         view = view[mask]
+    if new_today:
+        today_date = pd.Timestamp.now().date()
+        view = view[view["fetched_date"].dt.date == today_date]
     if country_filt != "All" and "country" in view.columns:
         view = view[view["country"] == country_filt]
     if date_filt != "All time":
@@ -333,10 +338,9 @@ intel_cols = [c for c in
     if c in df.columns]
 
 reviewed_cols = [c for c in
-    ["in_review", "status", "score", "deadline", "title", "buyer",
+    ["in_review", "status", "notes", "score", "deadline", "title", "buyer",
      "country", "value", "currency", "notice_type", "t1_hits", "description", "link"]
-    if c in df.columns or c in ("in_review", "status")]
-   
+    if c in df.columns or c in ("in_review", "status", "notes")]
 
 
 def prep_description(view: pd.DataFrame) -> pd.DataFrame:
@@ -385,37 +389,49 @@ def show_table(view: pd.DataFrame, cols: list, tab_key: str):
 # ── REVIEWED TABLE ────────────────────────────────────────────
 def show_reviewed_table(view: pd.DataFrame, tab_key: str):
     if view.empty:
-        st.info("No reviewed notices yet. Check the ✓ box on any notice to move it here.")
+        st.info("No reviewed notices yet.")
         return
     view = view.copy()
     view["in_review"] = True
     view["status"]    = view["pub_num"].astype(str).map(reviews).fillna("Reviewed")
+    view["notes"]     = view["pub_num"].astype(str).map(notes).fillna("")
     display_cols = [c for c in reviewed_cols if c in view.columns]
 
     edited = st.data_editor(
         prep_description(view)[display_cols].reset_index(drop=True),
-        column_config=col_config_reviewed(view),
-        disabled=[c for c in display_cols if c not in ("in_review", "status")],
+        column_config={
+            "in_review": st.column_config.CheckboxColumn("Keep", default=True, width="small"),
+            "status":    st.column_config.SelectboxColumn(
+                             "Status", options=STATUS_OPTIONS, default="Reviewed", width="medium"),
+            "notes":     st.column_config.TextColumn("Notes", width="large"),
+            "link":      st.column_config.LinkColumn("Link", display_text="View ↗"),
+            "score":     st.column_config.NumberColumn("Score", format="%d ⭐"),
+            "value":     st.column_config.NumberColumn("Value", format="€%,.0f"),
+        },
+        disabled=[c for c in display_cols if c not in ("in_review", "status", "notes")],
         use_container_width=True,
         height=520,
         key=f"editor_{tab_key}",
     )
 
-    if "status" in edited.columns or "in_review" in edited.columns:
-        pub_nums = view["pub_num"].astype(str).tolist()
-        changed  = False
-        for i in range(len(edited)):
-            if i >= len(pub_nums): break
-            pn         = pub_nums[i]
-            keep       = edited["in_review"].iloc[i] if "in_review" in edited.columns else True
-            new_status = edited["status"].iloc[i] if "status" in edited.columns else reviews.get(pn, "Reviewed")
-            if not keep and pn in reviews:
-                del reviews[pn]; changed = True
-            elif keep and new_status and reviews.get(pn) != new_status:
+    pub_nums = view["pub_num"].astype(str).tolist()
+    changed  = False
+    for i in range(len(edited)):
+        if i >= len(pub_nums): break
+        pn         = pub_nums[i]
+        keep       = edited["in_review"].iloc[i] if "in_review" in edited.columns else True
+        new_status = edited["status"].iloc[i] if "status" in edited.columns else reviews.get(pn, "Reviewed")
+        new_note   = edited["notes"].iloc[i] if "notes" in edited.columns else ""
+        if not keep and pn in reviews:
+            del reviews[pn]; notes.pop(pn, None); changed = True
+        elif keep:
+            if reviews.get(pn) != new_status:
                 reviews[pn] = new_status; changed = True
-        if changed:
-            save_reviews(reviews)
-            st.rerun()
+            if notes.get(pn, "") != (new_note or ""):
+                notes[pn] = new_note or ""; changed = True
+    if changed:
+        save_reviews(reviews, notes)
+        st.rerun()
 
 # ── TABS ──────────────────────────────────────────────────────
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
@@ -450,6 +466,19 @@ with tab1:
 with tab2:
     combined_open, open_overlap = merge_sources(open_, ai_open_)
     view = apply_filters(combined_open)
+
+    # deadline timeline
+    if not view.empty and "deadline" in view.columns:
+        dl = view[view["deadline"] != "—"].copy()
+        if not dl.empty:
+            dl["deadline_dt"] = pd.to_datetime(dl["deadline"], errors="coerce")
+            dl = dl.dropna(subset=["deadline_dt"])
+            dl["week"] = dl["deadline_dt"].dt.to_period("W").dt.start_time.dt.strftime("%b %d")
+            weekly = dl.groupby("week").size().rename("deadlines")
+            st.caption("Deadlines by week")
+            st.bar_chart(weekly, height=150)
+
+    # rest of tab 2 continues...
     col_a, col_b = st.columns([3, 1])
     with col_a:
         overlap_note = f" ·  **{open_overlap} appear in both** keyword + AI results" if open_overlap else ""
