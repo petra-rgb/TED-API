@@ -313,7 +313,30 @@ base_cols = [c for c in
      "value", "currency", "duration", "languages",
      "notice_type", "t1_hits", "description", "link"]
     if c in df.columns or c in ("reviewed", "ai_tag")]
-    
+
+def show_copy_brief(view: pd.DataFrame, key: str):
+    if view.empty:
+        return
+    st.markdown("---")
+    st.caption("Copy tender brief")
+    titles = ["— select a notice —"] + view["title"].astype(str).tolist()
+    selected = st.selectbox("", titles, key=f"copy_select_{key}", label_visibility="collapsed")
+    if selected == "— select a notice —":
+        return
+    row = view[view["title"].astype(str) == selected].iloc[0]
+    value_str = f"€{row['value']:,.0f}" if pd.notna(row.get("value")) else "—"
+    deadline_str = row.get("deadline", "—")
+    brief = f"""{row['title']}
+
+Buyer:    {row['buyer']}
+Country:  {row.get('country', '—')}
+Deadline: {deadline_str}
+Value:    {value_str}
+
+{str(row.get('description', ''))[:500]}
+
+🔗 {row.get('link', '')}"""
+    st.code(brief, language=None)
 # ── COLUMN CONFIGS ────────────────────────────────────────────
 def col_config_main(df):
     cfg = {
@@ -479,6 +502,8 @@ with tab1:
                 file_name=f"ted_planning_{today}.csv", mime="text/csv")
    
     show_table(view, planning_cols, "planning")
+    
+    show_copy_brief(view, "planning")
 
 # ── TAB 2: OPEN ───────────────────────────────────────────────
 with tab2:
@@ -517,6 +542,7 @@ with tab2:
                 file_name=f"ted_open_{today}.csv", mime="text/csv")
 
     show_table(view, base_cols, "open")
+    show_copy_brief(view, "open")
 # ── TAB 3: CLOSED ─────────────────────────────────────────────
 with tab3:
     if closed.empty:
