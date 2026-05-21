@@ -295,7 +295,54 @@ def prep_description(view: pd.DataFrame) -> pd.DataFrame:
         if col in view.columns:
             view[col] = view[col].fillna("—").replace("", "—")
     return view
+def show_cards(view: pd.DataFrame, tab_key: str):
+    if view.empty:
+        st.info("No notices match your filters.")
+        return
 
+    for i, (_, row) in enumerate(view.iterrows()):
+        is_reviewed = str(row["pub_num"]) in reviewed_pubs
+        col_check, col_main, col_right = st.columns([0.3, 5, 1.5])
+
+        with col_check:
+            checked = st.checkbox("", value=is_reviewed, key=f"card_{tab_key}_{i}")
+            if checked != is_reviewed:
+                if checked:
+                    reviews[str(row["pub_num"])] = "Reviewed"
+                else:
+                    reviews.pop(str(row["pub_num"]), None)
+                save_reviews(reviews, notes)
+                st.rerun()
+
+        with col_main:
+            title = str(row.get("title", ""))
+            link  = row.get("link", "")
+            st.markdown(f"**[{title}]({link})**")
+            
+            meta_parts = [
+                row.get("buyer", ""),
+                row.get("country", ""),
+            ]
+            if row.get("deadline") and row.get("deadline") != "—":
+                meta_parts.append(f"Deadline: {row['deadline']}")
+            st.caption("  ·  ".join(p for p in meta_parts if p))
+
+            desc = str(row.get("description", ""))
+            if desc and desc != "nan":
+                st.markdown(
+                    f"<p style='color:#555;font-size:0.85rem;margin-top:4px'>{desc[:250]}...</p>",
+                    unsafe_allow_html=True
+                )
+
+        with col_right:
+            if pd.notna(row.get("score")):
+                st.metric("Score", int(row["score"]))
+            elif "🤖" in title:
+                st.markdown("**AI verified**")
+            if pd.notna(row.get("value")):
+                st.metric("Value", f"€{row['value']:,.0f}")
+
+        st.divider()
 
 def col_config_main(df):
     cfg = {
@@ -460,7 +507,7 @@ with tab1:
             st.download_button("Download CSV",
                 data=view.to_csv(index=False).encode(),
                 file_name=f"ted_planning_{today}.csv", mime="text/csv")
-    show_table(view, planning_cols, "planning")
+    show_cards(view, "planning")
     show_copy_brief(view, "planning")
 
 
@@ -498,7 +545,7 @@ with tab2:
             st.download_button("Download CSV",
                 data=view.to_csv(index=False).encode(),
                 file_name=f"ted_open_{today}.csv", mime="text/csv")
-    show_table(view, base_cols, "open")
+    show_cards(view, "open")
     show_copy_brief(view, "open")
 
 
