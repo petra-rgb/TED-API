@@ -106,7 +106,9 @@ warn_cutoff = (pd.Timestamp.now() + pd.Timedelta(days=WARN_DAYS)).strftime("%Y-%
 open_deadlines = all_open[
     (all_open["deadline"] != "—") & (all_open["deadline"] >= today)
 ] if "deadline" in all_open.columns else pd.DataFrame()
-
+reviewed_pubs    = set(reviews.keys())
+in_process_count = sum(1 for s in reviews.values() if s == "In process of applying")
+no_match_count   = sum(1 for s in reviews.values() if s == "Not a match")
 urgent_count = len(open_deadlines[open_deadlines["deadline"] <= warn_cutoff])
 k1, k2, k3, k4, k5, k6, k7 = st.columns(7)
 k1.metric("📋 Planning",              len(all_planning))
