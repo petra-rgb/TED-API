@@ -7,8 +7,31 @@ st.set_page_config(
     page_icon="🔍",
     layout="wide"
 )
+
+st.logo("logo.png", size="large")
+
 st.markdown("""
 <style>
+    /* Main background — light grey */
+    .stApp {
+        background-color: #F2F2F2 !important;
+    }
+
+    /* Sidebar — pure white */
+    [data-testid="stSidebar"] {
+        background-color: #FFFFFF !important;
+    }
+
+    /* Header */
+    h1, h2, h3 {
+        color: #FF7A00 !important;
+    }
+
+    /* Metric labels */
+    [data-testid="stMetricLabel"] {
+        color: #FF7A00 !important;
+    }
+
     /* Active tab */
     button[data-baseweb="tab"][aria-selected="true"] {
         color: #FF7A00 !important;
@@ -28,43 +51,18 @@ st.markdown("""
         background-color: #FF7A00 !important;
     }
 
-    /* Metric labels */
-    [data-testid="stMetricLabel"] {
-        color: #FF7A00 !important;
-    }
-
     /* Links */
     a {
         color: #FF7A00 !important;
     }
 
-    /* Main background — white */
-    .stApp {
-        background-color: #FFFFFF !important;
-    }
-
-    /* Sidebar background — light grey */
-    [data-testid="stSidebar"] {
-        background-color: #F5F5F5 !important;
-    }
-
-    /* Text — dark so it's readable on white */
+    /* Body text — dark for readability */
     .stApp, p, span, label {
         color: #1A1A1A !important;
     }
-
-    /* Header */
-    h1 {
-        color: #FF7A00 !important;
-    }
 </style>
 """, unsafe_allow_html=True)
-col_logo, col_title = st.columns([1, 5])
-with col_logo:
-    st.image("logo.png", width=80)
-with col_title:
-    st.markdown("# 🔍 TED Tender Intelligence")
-    st.caption("DevelopMinded — live EU procurement opportunities")
+
 st.markdown("# 🔍 TED Tender Intelligence")
 st.caption("DevelopMinded — live EU procurement opportunities")
 
