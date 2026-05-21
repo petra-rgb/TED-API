@@ -238,7 +238,7 @@ if "deadline" in open_.columns:
             score_str    = f" | score {int(r['score'])}" if "score" in r and pd.notna(r.get("score")) else ""
             ai_badge     = " · *AI verified*" if is_ai else ""
             st.markdown(
-                f"- {icon} **[{str(r['title'])[:90]}]({r.get('link','')})**"
+                f"-  **[{str(r['title'])[:90]}]({r.get('link','')})**"
                 f"{status_badge}{ai_badge} "
                 f"— deadline **{r['deadline']}**{score_str}"
             )
