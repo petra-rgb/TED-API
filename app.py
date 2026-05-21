@@ -467,11 +467,11 @@ with tab2:
     combined_open, open_overlap = merge_sources(open_, ai_open_)
     view = apply_filters(combined_open)
 
-   if not view.empty and "deadline" in view.columns:
-       upcoming = view[view["deadline"] != "—"].copy()
-       upcoming = upcoming[upcoming["deadline"] >= today].sort_values("deadline").head(5)
+    if not view.empty and "deadline" in view.columns:
+        upcoming = view[view["deadline"] != "—"].copy()
+        upcoming = upcoming[upcoming["deadline"] >= today].sort_values("deadline").head(5)
         if not upcoming.empty:
-            st.caption("⏰ Next deadlines")
+            st.caption(" Next deadlines")
             cols = st.columns(len(upcoming))
             for i, (_, r) in enumerate(upcoming.iterrows()):
                 days_left = (pd.to_datetime(r["deadline"]) - pd.Timestamp.now()).days
@@ -483,17 +483,19 @@ with tab2:
                 )
             st.write("")
 
-    # rest of tab 2 continues...
+    ai_count     = view["title"].astype(str).str.startswith("🤖").sum() if not view.empty else 0
+    overlap_note = f" ·  **{open_overlap} appear in both** keyword + AI" if open_overlap else ""
+    ai_note      = f" · 🤖 **{ai_count} AI filtered**" if ai_count else ""
+
     col_a, col_b = st.columns([3, 1])
     with col_a:
-        overlap_note = f" ·  **{open_overlap} appear in both** keyword + AI results" if open_overlap else ""
-        st.caption(f"Showing **{len(view)}** of {len(combined_open)} open opportunities{overlap_note}")
+        st.caption(f"Showing **{len(view)}** of {len(combined_open)} open opportunities{overlap_note}{ai_note}")
     with col_b:
         if not view.empty:
-            st.download_button("Download CSV",
+            st.download_button(" Download CSV",
                 data=view.to_csv(index=False).encode(),
                 file_name=f"ted_open_{today}.csv", mime="text/csv")
-   
+
     show_table(view, base_cols, "open")
 # ── TAB 3: CLOSED ─────────────────────────────────────────────
 with tab3:
