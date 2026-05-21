@@ -1,0 +1,6 @@
+[theme]
+primaryColor      = "#0066CC"   # buttons, sliders, active elements
+backgroundColor   = "#0F1117"   # main background
+secondaryBackgroundColor = "#1A1D27"  # sidebar + cards
+textColor         = "#FAFAFA"
+font              = "sans serif"
