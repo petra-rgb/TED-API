@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 
-st.set_page_config(page_title="TED Intelligence — DevelopMinded", layout="wide")
+st.set_page_config(page_title="Opportunity Search", layout="wide")
 st.logo("logo.png", size="large")
 
 st.markdown("""
@@ -42,7 +42,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.markdown("# TED Tender Opportunities")
+st.markdown("# Opportunity Search")
 
 CSV_FILE       = "ted_results.csv"
 AI_CSV_FILE    = "ted_results_ai.csv"
