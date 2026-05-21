@@ -475,7 +475,7 @@ with tab1:
         st.caption(f"Showing **{len(view)}** of {len(combined_planning)} planning notices — no deadline set{overlap_note}")
     with col_b:
         if not view.empty:
-            st.download_button("⬇️ Download CSV",
+            st.download_button("Download CSV",
                 data=view.to_csv(index=False).encode(),
                 file_name=f"ted_planning_{today}.csv", mime="text/csv")
     with st.expander("Score distribution", expanded=False):
