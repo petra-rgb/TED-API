@@ -83,14 +83,17 @@ closed   = df[df["bucket"] == "Market intelligence"].copy()
 
 # AI tab buckets
 ai_live = pd.DataFrame()
+ai_planning = pd.DataFrame()
+ai_open_ = pd.DataFrame()
 if not df_ai.empty:
-    ai_lp    = df_ai[df_ai["bucket"].isin(["Live opportunity", "Possible opportunity"])].copy()
-    ai_live  = ai_lp.copy()
+    ai_lp     = df_ai[df_ai["bucket"].isin(["Live opportunity", "Possible opportunity"])].copy()
+    ai_live   = ai_lp.copy()
+    ai_planning = ai_lp[ai_lp["deadline"] == "—"].copy()
+    ai_open_  = ai_lp[ai_lp["deadline"] != "—"].copy()
 
-reviewed_pubs    = set(reviews.keys())
-in_process_count = sum(1 for s in reviews.values() if s == "In process of applying")
-no_match_count   = sum(1 for s in reviews.values() if s == "Not a match")
-
+# Combined deduped counts (for KPIs only — tabs still show their own source)
+all_planning = pd.concat([planning, ai_planning]).drop_duplicates(subset=["pub_num"]) if not ai_planning.empty else planning
+all_open     = pd.concat([open_, ai_open_]).drop_duplicates(subset=["pub_num"]) if not ai_open_.empty else open_
 # ── Last updated ──────────────────────────────────────────────
 last_run     = df["fetched_date"].max()
 last_run_str = last_run.strftime("%Y-%m-%d") if pd.notna(last_run) else "—"
@@ -100,15 +103,14 @@ st.caption(f"Last updated: **{last_run_str}**")
 today       = datetime.now().strftime("%Y-%m-%d")
 warn_cutoff = (pd.Timestamp.now() + pd.Timedelta(days=WARN_DAYS)).strftime("%Y-%m-%d")
 
-open_deadlines = open_[
-    (open_["deadline"] != "—") & (open_["deadline"] >= today)
-] if "deadline" in open_.columns else pd.DataFrame()
+open_deadlines = all_open[
+    (all_open["deadline"] != "—") & (all_open["deadline"] >= today)
+] if "deadline" in all_open.columns else pd.DataFrame()
 
 urgent_count = len(open_deadlines[open_deadlines["deadline"] <= warn_cutoff])
-
 k1, k2, k3, k4, k5, k6, k7 = st.columns(7)
-k1.metric("📋 Planning",              len(planning))
-k2.metric("🟢 Open",                  len(open_))
+k1.metric("📋 Planning",              len(all_planning))
+k2.metric("🟢 Open",                  len(all_open))
 k3.metric("📁 Closed",                len(closed))
 k4.metric(f"⏰ Deadline ≤{WARN_DAYS}d", urgent_count)
 k5.metric("🤖 AI Relevant",           len(ai_live))
