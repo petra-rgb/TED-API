@@ -138,6 +138,15 @@ all_planning = pd.concat([planning, ai_planning]).drop_duplicates(subset=["pub_n
 all_open     = pd.concat([open_, ai_open_]).drop_duplicates(subset=["pub_num"]) if not ai_open_.empty else open_
 
 # Active counts — exclude past deadlines
+today = datetime.now().strftime("%Y-%m-%d")
+
+all_open_active = all_open[
+    (all_open["deadline"] == "—") | (all_open["deadline"] >= today)
+] if "deadline" in all_open.columns else all_open
+
+ai_live_active = ai_live[
+    (ai_live["deadline"] == "—") | (ai_live["deadline"] >= today)
+] if not ai_live.empty and "deadline" in ai_live.columns else ai_live
 all_open_active = all_open[
     (all_open["deadline"] == "—") | (all_open["deadline"] >= today)
 ] if "deadline" in all_open.columns else all_open
