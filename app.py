@@ -7,6 +7,53 @@ st.set_page_config(
     page_icon="🔍",
     layout="wide"
 )
+st.markdown("""
+<style>
+    /* Primary orange accent */
+    :root {
+        --primary: #FF7A00;
+    }
+
+    /* Active tab */
+    button[data-baseweb="tab"][aria-selected="true"] {
+        color: #FF7A00 !important;
+        border-bottom: 3px solid #FF7A00 !important;
+    }
+
+    /* Buttons */
+    .stButton > button, .stDownloadButton > button {
+        background-color: #FF7A00 !important;
+        color: white !important;
+        border: none !important;
+        border-radius: 6px !important;
+    }
+
+    /* Slider */
+    .stSlider [data-baseweb="slider"] [role="slider"] {
+        background-color: #FF7A00 !important;
+    }
+
+    /* Metric labels */
+    [data-testid="stMetricLabel"] {
+        color: #FF7A00 !important;
+    }
+
+    /* Links */
+    a {
+        color: #FF7A00 !important;
+    }
+
+    /* Sidebar background */
+    [data-testid="stSidebar"] {
+        background-color: #111111 !important;
+    }
+
+    /* Header */
+    h1 {
+        color: #FF7A00 !important;
+    }
+</style>
+""", unsafe_allow_html=True)
 st.logo("logo.png", size="large")          # shows in sidebar top-left
 
 st.markdown("# 🔍 TED Tender Intelligence")
