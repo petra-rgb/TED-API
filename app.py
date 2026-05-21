@@ -195,7 +195,7 @@ with st.sidebar:
 def apply_filters(view: pd.DataFrame) -> pd.DataFrame:
     if view.empty: return view
     if "score" in view.columns:
-        view = view[view["score"] >= min_score].copy()
+        view = view[(view["score"] >= min_score) | view["score"].isna()].copy()
     else:
         view = view.copy()
     if search:
