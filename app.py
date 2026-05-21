@@ -328,9 +328,9 @@ base_cols = [c for c in
     if c in df.columns or c == "reviewed"]
 
 intel_cols = [c for c in
-    ["reviewed", "score", "deadline", "title", "buyer", "country",
-     "value", "currency", "notice_type", "t1_hits", "link"]
-    if c in df.columns or c == "reviewed"]
+    ["title", "buyer", "country",
+     "value", "currency", "link"]
+    if c in df.columns]
 
 reviewed_cols = [c for c in
     ["in_review", "status", "score", "deadline", "title", "buyer",
@@ -498,12 +498,16 @@ with tab3:
             v3.metric("Total awarded value",  f"€{view['value'].sum():,.0f}")
             st.write("")
 
-        show_table(view, intel_cols, "closed")
-        if not view.empty:
-            st.download_button("Download CSV",
-                data=view.to_csv(index=False).encode(),
-                file_name=f"ted_closed_{today}.csv", mime="text/csv")
-
+        display_cols = [c for c in intel_cols if c in view.columns]
+        st.dataframe(
+            prep_description(view)[display_cols].reset_index(drop=True),
+            column_config={
+                "link":  st.column_config.LinkColumn("Link", display_text="View ↗"),
+                "value": st.column_config.NumberColumn("Value", format="€%,.0f"),
+            },
+            use_container_width=True,
+            height=520,
+)
 # ── TAB 4: REVIEWED ───────────────────────────────────────────
 with tab4:
     status_filter = st.radio(
