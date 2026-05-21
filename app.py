@@ -222,34 +222,42 @@ def merge_sources(kw_df: pd.DataFrame, ai_df: pd.DataFrame):
     if kw_df.empty and ai_df.empty:
         return pd.DataFrame(), 0
     if kw_df.empty:
-        out = ai_df.copy(); out["source"] = "🤖 AI"; return out, 0
+        out = ai_df.copy()
+        out["ai_tag"] = "🤖"
+        return out, 0
     if ai_df.empty:
-        out = kw_df.copy(); out["source"] = "🔍 keyword"; return out, 0
+        out = kw_df.copy()
+        out["ai_tag"] = ""
+        return out, 0
 
     kw_pubs = set(kw_df["pub_num"].astype(str))
     ai_pubs = set(ai_df["pub_num"].astype(str))
     overlap  = kw_pubs & ai_pubs
 
     kw_out = kw_df.copy()
-    kw_out["source"] = kw_out["pub_num"].astype(str).apply(
-        lambda x: "🔍+🤖 both" if x in ai_pubs else "🔍 keyword"
+    kw_out["ai_tag"] = kw_out["pub_num"].astype(str).apply(
+        lambda x: "🤖+" if x in ai_pubs else ""
     )
+
     ai_only = ai_df[~ai_df["pub_num"].astype(str).isin(kw_pubs)].copy()
-    ai_only["source"] = "🤖 AI"
+    ai_only["ai_tag"] = "🤖"
+    # AI-only notices have no keyword score — blank is cleaner than 0
+    if "score" in ai_only.columns:
+        ai_only["score"] = pd.NA
 
     return pd.concat([kw_out, ai_only], ignore_index=True), len(overlap)
 
 base_cols = [c for c in
-    ["reviewed", "source", "score", "bucket", "deadline", "title", "buyer", "country",
+    ["reviewed", "ai_tag", "score", "bucket", "deadline", "title", "buyer", "country",
      "value", "currency", "duration", "languages",
      "notice_type", "t1_hits", "description", "link"]
-    if c in df.columns or c in ("reviewed", "source")]
+    if c in df.columns or c in ("reviewed", "ai_tag")]
     
 # ── COLUMN CONFIGS ────────────────────────────────────────────
 def col_config_main(df):
     cfg = {
         "reviewed": st.column_config.CheckboxColumn("✓", default=False, width="small"),
-        "source":   st.column_config.TextColumn("Source", width="small"),   # ← add this
+        "ai_tag":   st.column_config.TextColumn("AI", width="small"),
         "link":     st.column_config.LinkColumn("Link", display_text="View ↗"),
         "score":    st.column_config.NumberColumn("Score", format="%d ⭐"),
     }
