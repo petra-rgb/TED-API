@@ -60,6 +60,34 @@ st.markdown("""
     .stApp, p, span, label {
         color: #1A1A1A !important;
     }
+        /* Card effect around main content */
+    [data-testid="stDataEditor"] {
+        border: 1px solid #E0E0E0 !important;
+        border-radius: 8px !important;
+    }
+
+    /* Stronger tab bar separator */
+    [data-testid="stTabs"] {
+        border-bottom: 2px solid #E0E0E0 !important;
+    }
+
+    /* Metric values bigger/bolder */
+    [data-testid="stMetricValue"] {
+        font-size: 2rem !important;
+        font-weight: 700 !important;
+        color: #1A1A1A !important;
+    }
+
+    /* Deadline alert — more visible */
+    [data-testid="stAlert"] {
+        border-left: 4px solid #FF7A00 !important;
+        background-color: #FFF4EC !important;
+    }
+
+    /* Caption text lighter */
+    [data-testid="stCaptionContainer"] {
+        color: #888888 !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -351,11 +379,14 @@ reviewed_cols = [c for c in
 
 
 def prep_description(view: pd.DataFrame) -> pd.DataFrame:
+    view = view.copy()
     if "description" in view.columns:
-        view = view.copy()
         view["description"] = view["description"].fillna("").apply(
             lambda x: x[:200] + "…" if len(x) > 200 else x
         )
+    for col in ["value", "currency", "languages", "duration"]:
+        if col in view.columns:
+            view[col] = view[col].fillna("—").replace("", "—")
     return view
 
 # ── MAIN TABLE ────────────────────────────────────────────────
