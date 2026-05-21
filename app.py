@@ -432,18 +432,18 @@ with tab1:
     view = apply_filters(combined_planning)
 
     ai_count    = view["title"].astype(str).str.startswith("🤖").sum() if not view.empty else 0
-    overlap_note = f" · ⚠️ **{planning_overlap} appear in both** keyword + AI" if planning_overlap else ""
-    ai_note      = f" · 🤖 **{ai_count} AI filtered**" if ai_count else ""
+    overlap_note = f" ·  **{planning_overlap} appear in both** keyword + AI" if planning_overlap else ""
+    ai_note      = f" ·  **{ai_count} AI filtered**" if ai_count else ""
 
     col_a, col_b = st.columns([3, 1])
     with col_a:
         st.caption(f"Showing **{len(view)}** of {len(combined_planning)} planning notices — no deadline set{overlap_note}{ai_note}")
     with col_b:
         if not view.empty:
-            st.download_button("⬇️ Download CSV",
+            st.download_button(" Download CSV",
                 data=view.to_csv(index=False).encode(),
                 file_name=f"ted_planning_{today}.csv", mime="text/csv")
-    with st.expander("📊 Score distribution", expanded=False):
+    with st.expander(" Score distribution", expanded=False):
         if not view.empty and "score" in view.columns:
             scored = view["score"].dropna()
             if not scored.empty:
