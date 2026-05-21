@@ -413,7 +413,7 @@ with tab2:
             st.download_button("⬇️ Download CSV",
                 data=view.to_csv(index=False).encode(),
                 file_name=f"ted_open_{today}.csv", mime="text/csv")
-   with st.expander("📊 Score distribution", expanded=False):
+    with st.expander("📊 Score distribution", expanded=False):
         if not view.empty and "score" in view.columns:
             scored = view["score"].dropna()
             if not scored.empty:
