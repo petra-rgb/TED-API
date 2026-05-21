@@ -299,16 +299,12 @@ def prep_description(view: pd.DataFrame) -> pd.DataFrame:
 
 def col_config_main(df):
     cfg = {
-        "reviewed":    st.column_config.CheckboxColumn("Done", width="small"),
-        "score":       st.column_config.NumberColumn("Score", format="%d", width="small"),
-        "deadline":    st.column_config.TextColumn("Deadline", width="small"),
-        "title":       st.column_config.TextColumn("Title", width="large"),
-        "buyer":       st.column_config.TextColumn("Buyer", width="medium"),
-        "country":     st.column_config.TextColumn("Country", width="small"),
-        "value":       st.column_config.NumberColumn("Value", format="€%,.0f", width="small"),
-        "description": st.column_config.TextColumn("Description", width="large"),
-        "link":        st.column_config.LinkColumn("Link", display_text="View", width="small"),
+        "reviewed": st.column_config.CheckboxColumn("Done", default=False, width="small"),
+        "link":     st.column_config.LinkColumn("Link", display_text="View"),
+        "score":    st.column_config.NumberColumn("Score", format="%d"),
     }
+    if "value" in df.columns:
+        cfg["value"] = st.column_config.NumberColumn("Value", format="€%,.0f")
     return cfg
 
 
