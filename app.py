@@ -91,9 +91,6 @@ def save_reviews(_sb, reviews: dict, notes: dict):
     except Exception as e:
         st.warning(f"Could not save reviews: {e}")
 
-df    = load_data()
-df_ai = load_ai_data()
-
 if df.empty:
     st.warning("No data yet. The daily fetch has not run or the CSV is missing.")
     st.stop()
