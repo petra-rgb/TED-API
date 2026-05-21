@@ -468,20 +468,20 @@ with tab2:
     view = apply_filters(combined_open)
 
    if not view.empty and "deadline" in view.columns:
-        upcoming = view[view["deadline"] != "—"].copy()
-        upcoming = upcoming[upcoming["deadline"] >= today].sort_values("deadline").head(5)
-    if not upcoming.empty:
-        st.caption("⏰ Next deadlines")
-        cols = st.columns(len(upcoming))
-        for i, (_, r) in enumerate(upcoming.iterrows()):
-            days_left = (pd.to_datetime(r["deadline"]) - pd.Timestamp.now()).days
-            cols[i].metric(
-                label=str(r["title"])[:40] + "…",
-                value=r["deadline"],
-                delta=f"{days_left}d left",
-                delta_color="inverse"
-            )
-        st.write("")
+       upcoming = view[view["deadline"] != "—"].copy()
+       upcoming = upcoming[upcoming["deadline"] >= today].sort_values("deadline").head(5)
+        if not upcoming.empty:
+            st.caption("⏰ Next deadlines")
+            cols = st.columns(len(upcoming))
+            for i, (_, r) in enumerate(upcoming.iterrows()):
+                days_left = (pd.to_datetime(r["deadline"]) - pd.Timestamp.now()).days
+                cols[i].metric(
+                    label=str(r["title"])[:40] + "…",
+                    value=r["deadline"],
+                    delta=f"{days_left}d left",
+                    delta_color="inverse"
+                )
+            st.write("")
 
     # rest of tab 2 continues...
     col_a, col_b = st.columns([3, 1])
