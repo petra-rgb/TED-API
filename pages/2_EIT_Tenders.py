@@ -115,7 +115,7 @@ with st.sidebar:
     st.markdown("## Filters")
     fit_filter  = st.multiselect("Fit", ["YES", "MAYBE", "NO"])
     min_score   = st.slider("Min score", 0, 10, 0)
-    hide_no     = st.toggle("Hide NO-fit", value=True)
+    hide_no     = st.toggle("Hide NO-fit", value=False)
     sources     = ["All sources"]
     if not df_active.empty and "source" in df_active.columns:
         sources += sorted(df_active["source"].dropna().unique().tolist())
