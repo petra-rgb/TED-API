@@ -1,9 +1,10 @@
+import re
 import streamlit as st
 import pandas as pd
 from datetime import datetime
 from pathlib import Path
 
-st.set_page_config(page_title="DevelopMinded Opportunity Search",  layout="wide")
+st.set_page_config(page_title="DevelopMinded Intelligence", page_icon="🔍", layout="wide")
 st.logo("logo.png", size="large")
 
 st.markdown("""
@@ -112,9 +113,33 @@ if not df_ai.empty:
     ted_ai = len(ai_active)
 
 
+# ── EIT deadline parser ───────────────────────────────────────────────────────
+def _eit_parse_ts(text) -> pd.Timestamp:
+    if not text or str(text).strip() in ("", "nan", "—"):
+        return pd.NaT
+    text = str(text).strip()
+    text = re.sub(r"\b(\d{1,2})(st|nd|rd|th)\b", r"\1", text, flags=re.IGNORECASE)
+    text = re.sub(r"\s*[\(\[].*?[\)\]]", "", text).strip()
+    text = re.sub(r"\s+at\s+\d{1,2}:\d{2}.*$", "", text, flags=re.IGNORECASE).strip()
+    m = re.search(r"(\d{1,2})/(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})", text)
+    if m:
+        text = f"{m.group(2)} {m.group(3)} {m.group(4)}"
+    m = re.search(r"[Ee]nd\s+of\s+([A-Za-z]+)\s+(\d{4})", text)
+    if m:
+        text = f"28 {m.group(1)} {m.group(2)}"
+    for fmt in ("%d %B %Y", "%B %d %Y", "%B %d, %Y",
+                "%d.%m.%Y", "%d.%m.%y", "%Y-%m-%d", "%d/%m/%Y"):
+        try:
+            return pd.Timestamp(datetime.strptime(text[:30].strip(), fmt))
+        except Exception:
+            pass
+    return pd.to_datetime(text, dayfirst=True, errors="coerce")
+
+
 # ── EIT metrics ───────────────────────────────────────────────────────────────
 eit_last_run = "—"
 eit_open = eit_yes = eit_maybe = eit_new = 0
+eit_urgent_rows = pd.DataFrame()
 
 if not df_eit.empty:
     if EIT_ACTIVE.exists():
@@ -123,6 +148,18 @@ if not df_eit.empty:
     eit_open  = len(df_eit)
     eit_yes   = int((df_eit["fit"] == "YES").sum())   if "fit" in df_eit.columns else 0
     eit_maybe = int((df_eit["fit"] == "MAYBE").sum()) if "fit" in df_eit.columns else 0
+
+    # Parse deadlines and find urgent ones
+    df_eit = df_eit.copy()
+    df_eit["_best_dl"] = df_eit.apply(
+        lambda r: str(r.get("call_deadline") or r.get("deadline") or "").strip(), axis=1
+    )
+    df_eit["_dl_ts"] = df_eit["_best_dl"].apply(_eit_parse_ts)
+    eit_urgent_rows = df_eit[
+        df_eit["_dl_ts"].notna() &
+        (df_eit["_dl_ts"] >= today_ts) &
+        (df_eit["_dl_ts"] <= (today_ts + pd.Timedelta(days=WARN_DAYS)))
+    ].sort_values("_dl_ts")
 
 if not df_eit_new.empty:
     eit_new = len(df_eit_new[df_eit_new["fit"].isin(["YES", "MAYBE"])]) if "fit" in df_eit_new.columns else len(df_eit_new)
@@ -153,7 +190,7 @@ with col_ted:
         st.switch_page("pages/1_Opportunity_Search.py")
 
 with col_eit:
-    st.markdown("### EIT Tenders")
+    st.markdown("###  EIT Tenders")
     st.caption(f"Last run: **{eit_last_run}** · refreshed every Monday")
     st.write("")
 
@@ -187,6 +224,27 @@ if not urgent_rows.empty:
                 st.metric("Score", score)
     st.write("")
 
+# EIT urgent deadlines
+if not eit_urgent_rows.empty:
+    st.markdown(f"###  EIT Deadlines in the next {WARN_DAYS} days")
+    for _, r in eit_urgent_rows.iterrows():
+        days_left = (r["_dl_ts"] - today_ts).days
+        fit  = str(r.get("fit", ""))
+        badge = "" if fit == "YES" else ("" if fit == "MAYBE" else "")
+        col_a, col_b = st.columns([5, 1])
+        with col_a:
+            st.markdown(
+                f"**[{str(r.get('title',''))[:85]}]({r.get('url','#')})**  \n"
+                f"<small>{r.get('source','')} &nbsp;·&nbsp; deadline **{r['_best_dl']}**"
+                f" &nbsp;·&nbsp; {days_left}d left &nbsp;·&nbsp; {badge} {fit}</small>",
+                unsafe_allow_html=True
+            )
+        with col_b:
+            score = int(r.get("score", 0))
+            if score:
+                st.metric("Score", score)
+    st.write("")
+
 # EIT strong matches if any
 if not df_eit.empty and eit_yes > 0 and "fit" in df_eit.columns:
     yes_tenders = df_eit[df_eit["fit"] == "YES"]
@@ -203,4 +261,3 @@ if not df_eit.empty and eit_yes > 0 and "fit" in df_eit.columns:
         if r.get("call_summary") and str(r.get("call_summary")) != "nan":
             st.caption(str(r["call_summary"])[:200] + "…")
         st.write("")
-
