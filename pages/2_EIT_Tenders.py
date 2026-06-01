@@ -269,4 +269,3 @@ with tab2:
                 )
         show_table(new_view, "new_week")
         show_full_analysis(new_view)
-

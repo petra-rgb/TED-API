@@ -1,0 +1,42 @@
+name: EIT Weekly Tender Scrape
+
+on:
+  schedule:
+    - cron: '0 7 * * 1'   # Every Monday at 07:00 UTC
+  workflow_dispatch:        # Also allows manual "Run workflow" button on GitHub
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write       # needed to commit updated CSVs back to the repo
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run weekly EIT scraper + Claude evaluation
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: python weekly_run.py
+
+      - name: Commit updated data files
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add output/all_tenders_master.csv \
+                  output/evaluated_master.csv   \
+                  output/active_tenders.csv     \
+                  output/new_this_week.csv
+          git diff --staged --quiet \
+            || git commit -m "data: weekly EIT tender update $(date -u +%Y-%m-%d)"
+          git push
