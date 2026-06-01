@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 from supabase import create_client
-st.set_page_config(page_title="Opportunity Search", layout="wide")
+st.set_page_config(page_title="Ted Tenders", layout="wide")
 st.logo("logo.png", size="large")
 
 st.markdown("""
