@@ -52,7 +52,7 @@ NEW_WEEK_CSV = OUTPUT / "new_this_week.csv"
 today_str    = datetime.now().strftime("%Y-%m-%d")
 
 FIT_ORDER = {"YES": 0, "MAYBE": 1, "NO": 2, "ERROR": 3}
-FIT_BADGE = {"YES": "✅ YES", "MAYBE": "🟡 MAYBE", "NO": "❌ NO", "ERROR": "⚠️ ERROR"}
+FIT_BADGE = {"YES": "YES", "MAYBE": " MAYBE", "NO": " NO", "ERROR": " ERROR"}
 
 
 # ── Load CSVs ─────────────────────────────────────────────────────────────────
@@ -108,9 +108,9 @@ if not df_active.empty:
 
     m1, m2, m3, m4, m5 = st.columns(5)
     m1.metric("Open Tenders",    len(df_active))
-    m2.metric("Strong Match ✅", n_yes)
-    m3.metric("Possible 🟡",    n_maybe)
-    m4.metric("No Match ❌",     n_no)
+    m2.metric("Strong Match ", n_yes)
+    m3.metric("Possible ",    n_maybe)
+    m4.metric("No Match ",     n_no)
     m5.metric("New This Week",   n_new)
     st.write("")
 
