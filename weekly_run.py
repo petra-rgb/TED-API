@@ -191,6 +191,19 @@ def run(api_key: str = None, verbose: bool = True) -> list[dict]:
     else:
         pd.DataFrame(columns=_placeholder_cols).to_csv(NEW_WEEK_CSV, index=False)
 
+    # ── Slack notification ────────────────────────────────────────────────────
+    slack_url = os.environ.get("SLACK_WEBHOOK_URL", "")
+    relevant_active = [
+        r for r in new_evaluated
+        if r.get("fit") in ("YES", "MAYBE") and not _is_expired(r)
+    ]
+    if relevant_active:
+        notify_slack(slack_url, relevant_active, run_time[:10])
+        if verbose:
+            print(f"     Slack notification sent: {len(relevant_active)} relevant tender(s)")
+    elif verbose and slack_url:
+        print("     Slack: no new active relevant tenders this week — notification skipped")
+
     # ── Summary ───────────────────────────────────────────────────────────────
     if verbose:
         def _safe_len(path):
@@ -261,4 +274,3 @@ if __name__ == "__main__":
     relevant = [r for r in results if r.get("fit") in ("YES", "MAYBE")]
     if relevant:
         notify_slack(slack_url, relevant, datetime.now(timezone.utc).strftime("%Y-%m-%d"))
-
