@@ -1,5 +1,5 @@
 """
-EIT Tender Intelligence — DevelopMinded
+EIT Tender Intelligence — DevelopMinded 
 Matches the TED Opportunity Search visual style.
 Data is refreshed weekly by GitHub Actions (weekly_run.py).
 """
@@ -97,7 +97,6 @@ with st.sidebar:
     st.divider()
     st.caption(
         "Scrapes 8 EIT KIC websites weekly.\n\n"
-        "Only tenders **not seen before** are sent to Claude — ~$0.03 per run."
     )
 
 
