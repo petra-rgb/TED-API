@@ -177,17 +177,19 @@ def run(api_key: str = None, verbose: bool = True) -> list[dict]:
         pd.DataFrame(active).to_csv(ACTIVE_CSV, index=False)
         if verbose:
             print(f"     Active tenders (Streamlit): {len(active)}")
+
     # Save new_this_week.csv — new evaluated tenders that aren't expired
-    _cols = ["id", "source", "title", "url", "deadline", "fit",
-             "score", "fit_reason", "fit_match", "call_summary", "call_deadline"]
+    _placeholder_cols = ["id", "source", "title", "url", "deadline", "fit",
+                         "score", "fit_reason", "fit_match", "call_summary", "call_deadline"]
     if new_evaluated:
         active_new = [r for r in new_evaluated if not _is_expired(r)]
         if active_new:
             pd.DataFrame(active_new).to_csv(NEW_WEEK_CSV, index=False)
         else:
-            pd.DataFrame(columns=_cols).to_csv(NEW_WEEK_CSV, index=False)
+            # All new tenders were expired — write header-only file
+            pd.DataFrame(columns=_placeholder_cols).to_csv(NEW_WEEK_CSV, index=False)
     else:
-        pd.DataFrame(columns=_cols).to_csv(NEW_WEEK_CSV, index=False)
+        pd.DataFrame(columns=_placeholder_cols).to_csv(NEW_WEEK_CSV, index=False)
 
     # ── Summary ───────────────────────────────────────────────────────────────
     if verbose:
@@ -198,7 +200,65 @@ def run(api_key: str = None, verbose: bool = True) -> list[dict]:
                 return 0
         n_active     = _safe_len(ACTIVE_CSV)
         n_new_active = _safe_len(NEW_WEEK_CSV)
+        print()
+        print(f"✅  Done — {run_time}")
+        print(f"    New tenders found       : {len(new_raw)}")
+        print(f"    New active this week    : {n_new_active}")
+        print(f"    Total active (Streamlit): {n_active}")
+        print(f"    Master raw total        : {_safe_len(MASTER_RAW_CSV)}")
+
+    return new_evaluated
+
+
+# ── Slack notification ────────────────────────────────────────────────────────
+def notify_slack(webhook_url: str, new_relevant: list[dict], run_date: str):
+    """
+    Post new YES/MAYBE tenders to Slack via an incoming webhook.
+    Set SLACK_WEBHOOK_URL in GitHub Secrets (and Streamlit Secrets if needed).
+    """
+    if not webhook_url or not new_relevant:
+        return
+    try:
+        import requests as _req
+    except ImportError:
+        print("  requests not installed — skipping Slack notification")
+        return
+
+    lines = [
+        f"🏛️ *EIT Weekly Update — {run_date}*",
+        f"{len(new_relevant)} new relevant tender(s) found\n",
+    ]
+    for r in new_relevant[:10]:
+        fit     = str(r.get("fit", ""))
+        score   = r.get("score", 0)
+        title   = str(r.get("title", ""))
+        source  = str(r.get("source", ""))
+        url     = str(r.get("url", ""))
+        dl      = str(r.get("call_deadline") or r.get("deadline") or "unknown")
+        summary = str(r.get("call_summary", "") or "")
+        badge   = "✅" if fit == "YES" else "🟡"
+
+        lines.append(f"{badge} *{fit} {score}/10* — <{url}|{title}>")
+        lines.append(f"_{source}_ · 📅 {dl}")
+        if summary and summary != "nan":
+            lines.append(f">{summary[:220]}")
+        lines.append("")
+
+    try:
+        resp = _req.post(webhook_url, json={"text": "\n".join(lines)}, timeout=10)
+        resp.raise_for_status()
+        print(f"  Slack notification sent ({len(new_relevant)} tender(s))")
+    except Exception as e:
+        print(f"  Slack notification failed: {e}")
+
+
 if __name__ == "__main__":
     import sys
-    key = sys.argv[1] if len(sys.argv) > 1 else None
-    run(api_key=key)
+    key         = sys.argv[1] if len(sys.argv) > 1 else None
+    slack_url   = os.environ.get("SLACK_WEBHOOK_URL", "")
+    results     = run(api_key=key)
+    # Notify Slack about new YES/MAYBE tenders
+    relevant = [r for r in results if r.get("fit") in ("YES", "MAYBE")]
+    if relevant:
+        notify_slack(slack_url, relevant, datetime.now(timezone.utc).strftime("%Y-%m-%d"))
+
