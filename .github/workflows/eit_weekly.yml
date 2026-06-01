@@ -27,6 +27,7 @@ jobs:
       - name: Run weekly EIT scraper + Claude evaluation
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         run: python weekly_run.py
 
       - name: Commit updated data files
