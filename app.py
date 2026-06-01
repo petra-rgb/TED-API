@@ -138,7 +138,7 @@ st.divider()
 col_ted, col_eit = st.columns(2, gap="large")
 
 with col_ted:
-    st.markdown("### 📊 TED Opportunities")
+    st.markdown("###  TED Opportunities")
     st.caption(f"Last run: **{ted_last_run}**")
     st.write("")
 
@@ -197,7 +197,7 @@ if not df_eit.empty and eit_yes > 0 and "fit" in df_eit.columns:
             deadline = "deadline unknown"
         st.markdown(
             f"**[{str(r['title'])[:85]}]({r.get('url', '#')})**  \n"
-            f"<small>{r.get('source', '')} &nbsp;·&nbsp; 📅 {deadline} &nbsp;·&nbsp; score {r.get('score', 0)}/10</small>",
+            f"<small>{r.get('source', '')} &nbsp;·&nbsp;  {deadline} &nbsp;·&nbsp; score {r.get('score', 0)}/10</small>",
             unsafe_allow_html=True,
         )
         if r.get("call_summary") and str(r.get("call_summary")) != "nan":
