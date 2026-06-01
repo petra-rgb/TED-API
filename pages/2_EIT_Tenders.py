@@ -113,7 +113,7 @@ if ACTIVE_CSV.exists():
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("## Filters")
-    fit_filter  = st.multiselect("Fit", ["YES", "MAYBE", "NO"], default=["YES", "MAYBE"])
+    fit_filter  = st.multiselect("Fit", ["YES", "MAYBE", "NO"])
     min_score   = st.slider("Min score", 0, 10, 0)
     hide_no     = st.toggle("Hide NO-fit", value=True)
     sources     = ["All sources"]
