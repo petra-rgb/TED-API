@@ -42,7 +42,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.markdown("# Opportunity Search")
+st.markdown("# TED Tenders")
 
 CSV_FILE       = "ted_results.csv"
 AI_CSV_FILE    = "ted_results_ai.csv"
