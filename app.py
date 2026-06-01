@@ -3,7 +3,7 @@ import pandas as pd
 from datetime import datetime
 from pathlib import Path
 
-st.set_page_config(page_title="DevelopMinded Intelligence", page_icon="🔍", layout="wide")
+st.set_page_config(page_title="DevelopMinded Opportunity Search",  layout="wide")
 st.logo("logo.png", size="large")
 
 st.markdown("""
@@ -129,7 +129,7 @@ if not df_eit_new.empty:
 
 
 # ── Page header ───────────────────────────────────────────────────────────────
-st.markdown("# Tender Intelligence")
+st.markdown("# Opportunity Search")
 st.caption(f"DevelopMinded · {datetime.now().strftime('%d %B %Y')}")
 st.divider()
 
