@@ -99,18 +99,50 @@ urgent_rows = pd.DataFrame()
 
 if not df_ted.empty:
     ted_last_run = df_ted["fetched_date"].max().strftime("%d %b %Y") if df_ted["fetched_date"].notna().any() else "—"
-    live = df_ted[df_ted["bucket"].isin(["Live opportunity", "Possible opportunity"])]
-    ted_planning = len(live[live["deadline"] == "—"])
-    open_dl = live[live["deadline"] != "—"]
-    open_active = open_dl[open_dl["deadline"] >= today]
-    ted_open = len(open_active)
-    urgent_rows = open_active[open_active["deadline"] <= warn_cutoff].sort_values("deadline")
+
+    live        = df_ted[df_ted["bucket"].isin(["Live opportunity", "Possible opportunity"])]
+    kw_planning = live[live["deadline"] == "—"]
+    kw_open     = live[live["deadline"] != "—"]
+
+    # Mirror TED page: merge keyword + AI, deduplicate on pub_num
+    ai_planning_df = pd.DataFrame()
+    ai_open_df     = pd.DataFrame()
+    if not df_ai.empty:
+        ai_lp          = df_ai[df_ai["bucket"].isin(["Live opportunity", "Possible opportunity"])]
+        ai_planning_df = ai_lp[ai_lp["deadline"] == "—"]
+        ai_open_df     = ai_lp[ai_lp["deadline"] != "—"]
+
+    all_planning = (
+        pd.concat([kw_planning, ai_planning_df]).drop_duplicates(subset=["pub_num"])
+        if not ai_planning_df.empty else kw_planning
+    )
+    all_open = (
+        pd.concat([kw_open, ai_open_df]).drop_duplicates(subset=["pub_num"])
+        if not ai_open_df.empty else kw_open
+    )
+
+    # Open = active (deadline not yet passed, or no deadline)
+    all_open_active = all_open[
+        (all_open["deadline"] == "—") | (all_open["deadline"] >= today)
+    ] if "deadline" in all_open.columns else all_open
+
+    ted_planning = len(all_planning)
+    ted_open     = len(all_open_active)
+
+    # Urgent = open tenders with deadline within WARN_DAYS
+    open_deadlines = all_open[
+        (all_open["deadline"] != "—") & (all_open["deadline"] >= today)
+    ] if "deadline" in all_open.columns else pd.DataFrame()
+    urgent_rows = (
+        open_deadlines[open_deadlines["deadline"] <= warn_cutoff].sort_values("deadline")
+        if not open_deadlines.empty else pd.DataFrame()
+    )
     ted_urgent = len(urgent_rows)
 
 if not df_ai.empty:
-    ai_live = df_ai[df_ai["bucket"].isin(["Live opportunity", "Possible opportunity"])]
+    ai_live   = df_ai[df_ai["bucket"].isin(["Live opportunity", "Possible opportunity"])]
     ai_active = ai_live[(ai_live["deadline"] == "—") | (ai_live["deadline"] >= today)]
-    ted_ai = len(ai_active)
+    ted_ai    = len(ai_active)
 
 
 # ── EIT deadline parser ───────────────────────────────────────────────────────
@@ -248,7 +280,7 @@ if not eit_urgent_rows.empty:
 # EIT strong matches if any
 if not df_eit.empty and eit_yes > 0 and "fit" in df_eit.columns:
     yes_tenders = df_eit[df_eit["fit"] == "YES"]
-    st.markdown("###  EIT Strong Matches")
+    st.markdown("### EIT Strong Matches")
     for _, r in yes_tenders.iterrows():
         deadline = str(r.get("call_deadline") or r.get("deadline") or "")
         if not deadline or deadline == "nan":
