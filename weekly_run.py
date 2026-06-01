@@ -177,29 +177,27 @@ def run(api_key: str = None, verbose: bool = True) -> list[dict]:
         pd.DataFrame(active).to_csv(ACTIVE_CSV, index=False)
         if verbose:
             print(f"     Active tenders (Streamlit): {len(active)}")
-
     # Save new_this_week.csv — new evaluated tenders that aren't expired
+    _cols = ["id", "source", "title", "url", "deadline", "fit",
+             "score", "fit_reason", "fit_match", "call_summary", "call_deadline"]
     if new_evaluated:
         active_new = [r for r in new_evaluated if not _is_expired(r)]
-        pd.DataFrame(active_new).to_csv(NEW_WEEK_CSV, index=False)
+        if active_new:
+            pd.DataFrame(active_new).to_csv(NEW_WEEK_CSV, index=False)
+        else:
+            pd.DataFrame(columns=_cols).to_csv(NEW_WEEK_CSV, index=False)
     else:
-        # Write empty file so Streamlit doesn't error on load
-        pd.DataFrame().to_csv(NEW_WEEK_CSV, index=False)
+        pd.DataFrame(columns=_cols).to_csv(NEW_WEEK_CSV, index=False)
 
     # ── Summary ───────────────────────────────────────────────────────────────
     if verbose:
-        n_active     = len(pd.read_csv(ACTIVE_CSV))   if ACTIVE_CSV.exists()   else 0
-        n_new_active = len(pd.read_csv(NEW_WEEK_CSV)) if NEW_WEEK_CSV.exists() else 0
-        print()
-        print(f"✅  Done — {run_time}")
-        print(f"    New tenders found       : {len(new_raw)}")
-        print(f"    New active this week    : {n_new_active}")
-        print(f"    Total active (Streamlit): {n_active}")
-        print(f"    Master raw total        : {len(pd.read_csv(MASTER_RAW_CSV)) if MASTER_RAW_CSV.exists() else 0}")
-
-    return new_evaluated
-
-
+        def _safe_len(path):
+            try:
+                return len(pd.read_csv(path))
+            except Exception:
+                return 0
+        n_active     = _safe_len(ACTIVE_CSV)
+        n_new_active = _safe_len(NEW_WEEK_CSV)
 if __name__ == "__main__":
     import sys
     key = sys.argv[1] if len(sys.argv) > 1 else None
