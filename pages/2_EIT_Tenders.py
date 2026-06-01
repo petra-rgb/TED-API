@@ -9,7 +9,7 @@ import pandas as pd
 from pathlib import Path
 from datetime import datetime
 
-st.set_page_config(page_title="EIT Tenders", page_icon="🏛️", layout="wide")
+st.set_page_config(page_title="EIT Tenders", layout="wide")
 st.logo("logo.png", size="large")
 
 # ── Same theme as the TED app ─────────────────────────────────────────────────
@@ -43,7 +43,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.markdown("# EIT Tender Intelligence")
+st.markdown("# EIT Tenders")
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 OUTPUT       = Path("output")
@@ -74,14 +74,16 @@ if ACTIVE_CSV.exists():
     mtime = datetime.fromtimestamp(ACTIVE_CSV.stat().st_mtime)
     st.caption(f"Last updated: **{mtime.strftime('%d %B %Y, %H:%M')}** — refreshed every Monday via GitHub Actions")
 
-
+for _df in (df_active, df_new):
+    if not _df.empty and "source" in _df.columns:
+        _df.drop(_df[_df["source"] == "EIT Health"].index, inplace=True)
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("## Filters")
 
     fit_filter = st.multiselect(
-        "Fit", ["YES", "MAYBE", "NO"],
-        default=["YES", "MAYBE"],
+        "Fit", ["YES", "MAYBE", "NO"]
+       
     )
     min_score = st.slider("Min score", 0, 10, 0)
 
