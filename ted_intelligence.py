@@ -256,7 +256,10 @@ def score_notice(title: str, buyer: str, ntype: str,
     ]
     cpv_boost = 3 * len(cpv_hits)
     sc = 7 * len(t1) + 3 * len(t2) + buyer_boost + cpv_boost
-    if ntype in INTEL_TYPES: sc -= 5
+    intel = ntype in INTEL_TYPES
+    if intel: sc -= 5
+    threshold = 1 if intel else MIN_SCORE   # intel just needs any keyword hit
+    if sc < threshold: return sc, "skip", t1, t2
     if sc < MIN_SCORE: return sc, "skip", t1, t2
 
     if ntype in INTEL_TYPES:           bucket = "Market intelligence"
