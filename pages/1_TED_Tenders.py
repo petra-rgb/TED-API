@@ -496,7 +496,7 @@ with tab2:
 
 
 with tab3:
-    if all_closed.empty::
+    if all_closed.empty:
         st.info("No closed/awarded contracts yet.")
     else:
         view = all_closed.copy()
