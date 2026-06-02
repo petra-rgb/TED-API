@@ -432,7 +432,7 @@ reviewed_cols = [c for c in
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
     f"Planning ({len(all_planning)})",
     f"Open ({len(all_open_active)})",
-    f"Closed ({len(closed)})",
+    f"Closed ({len(all_closed)})",
     f"Reviewed ({len(reviewed_pubs)})",
     f"AI Filtered ({len(ai_live_active)})",
 ])
@@ -508,7 +508,7 @@ with tab3:
             view = view[mask]
         if country_filt != "All" and "country" in view.columns:
             view = view[view["country"] == country_filt]
-        view = view[view["score"] >= min_score]
+        view = view[(view["score"] >= min_score) | view["score"].isna()]
         if hide_reviewed:
             view = view[~view["pub_num"].astype(str).isin(reviewed_pubs)]
 
@@ -608,3 +608,4 @@ with tab5:
             if c in view.columns or c == "reviewed"]
 
         show_table(view, tab_ai_cols, "ai_filtered")
+
