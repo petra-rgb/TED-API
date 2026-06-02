@@ -21,7 +21,7 @@ st.markdown("""
         border: none !important;
         border-radius: 6px !important;
     }
-    .stSlider [data-baseweb="slider"] [role="slider"] {
+    .stSlider [data-baseweb="slider"] [role="slider"] {x
         background-color: #F5C518 !important;
     }
     a { color: #F5C518 !important; }
@@ -107,7 +107,10 @@ warn_cutoff = (pd.Timestamp.now() + pd.Timedelta(days=WARN_DAYS)).strftime("%Y-%
 live_possible = df[df["bucket"].isin(["Live opportunity", "Possible opportunity"])].copy()
 planning      = live_possible[live_possible["deadline"] == "—"].copy()
 open_         = live_possible[live_possible["deadline"] != "—"].copy()
-closed        = df[df["bucket"] == "Market intelligence"].copy()
+closed = df[df["bucket"] == "Market intelligence"].copy()
+
+ai_closed = df_ai[df_ai["bucket"] == "Market intelligence"].copy() if not df_ai.empty else pd.DataFrame()
+all_closed = pd.concat([closed, ai_closed]).drop_duplicates(subset=["pub_num"]) if not ai_closed.empty else closed
 
 ai_live     = pd.DataFrame()
 ai_planning = pd.DataFrame()
@@ -145,7 +148,7 @@ st.caption(f"Last updated: **{last_run_str}**")
 k1, k2, k3, k4, k5, k6, k7 = st.columns(7)
 k1.metric("Planning",             len(all_planning))
 k2.metric("Open",                 len(all_open_active))
-k3.metric("Closed",               len(closed))
+k3.metric("Closed", len(all_closed))
 k4.metric(f"Deadline within {WARN_DAYS}d", urgent_count)
 k5.metric("AI Relevant",          len(ai_live_active))
 k6.metric("In process",           in_process_count)
@@ -493,10 +496,10 @@ with tab2:
 
 
 with tab3:
-    if closed.empty:
+    if all_closed.empty::
         st.info("No closed/awarded contracts yet.")
     else:
-        view = closed.copy()
+        view = all_closed.copy()
         if search:
             mask = (
                 view["title"].str.contains(search, case=False, na=False) |
@@ -509,7 +512,7 @@ with tab3:
         if hide_reviewed:
             view = view[~view["pub_num"].astype(str).isin(reviewed_pubs)]
 
-        st.caption(f"Showing **{len(view)}** awarded contracts — buyer research and budget benchmarking")
+        st.caption(f"Showing **{len(view)}** awarded contracts")
 
         if "value" in view.columns and view["value"].notna().any():
             v1, v2, v3 = st.columns(3)
