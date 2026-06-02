@@ -109,8 +109,6 @@ planning      = live_possible[live_possible["deadline"] == "—"].copy()
 open_         = live_possible[live_possible["deadline"] != "—"].copy()
 closed = df[df["bucket"] == "Market intelligence"].copy()
 
-ai_closed = df_ai[df_ai["bucket"] == "Market intelligence"].copy() if not df_ai.empty else pd.DataFrame()
-all_closed = pd.concat([closed, ai_closed]).drop_duplicates(subset=["pub_num"]) if not ai_closed.empty else closed
 
 ai_live     = pd.DataFrame()
 ai_planning = pd.DataFrame()
@@ -148,7 +146,7 @@ st.caption(f"Last updated: **{last_run_str}**")
 k1, k2, k3, k4, k5, k6, k7 = st.columns(7)
 k1.metric("Planning",             len(all_planning))
 k2.metric("Open",                 len(all_open_active))
-k3.metric("Closed", len(all_closed))
+k3.metric("Closed", len(closed))
 k4.metric(f"Deadline within {WARN_DAYS}d", urgent_count)
 k5.metric("AI Relevant",          len(ai_live_active))
 k6.metric("In process",           in_process_count)
@@ -432,7 +430,7 @@ reviewed_cols = [c for c in
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
     f"Planning ({len(all_planning)})",
     f"Open ({len(all_open_active)})",
-    f"Closed ({len(all_closed)})",
+    f"Closed ({len(closed)})",
     f"Reviewed ({len(reviewed_pubs)})",
     f"AI Filtered ({len(ai_live_active)})",
 ])
@@ -496,10 +494,10 @@ with tab2:
 
 
 with tab3:
-    if all_closed.empty:
+    if closed.empty:
         st.info("No closed/awarded contracts yet.")
     else:
-        view = all_closed.copy()
+        view = closed.copy()
         if search:
             mask = (
                 view["title"].str.contains(search, case=False, na=False) |
@@ -608,4 +606,3 @@ with tab5:
             if c in view.columns or c == "reviewed"]
 
         show_table(view, tab_ai_cols, "ai_filtered")
-
