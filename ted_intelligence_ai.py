@@ -1,5 +1,6 @@
-import requests, time, os
+import requests, time, os, json, re
 import pandas as pd
+import anthropic
 from datetime import datetime, timedelta, timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -59,6 +60,7 @@ RESPONSE_FIELDS = [
     "BT-131(d)-Lot",
     "deadline-date-lot",
     "BT-13(t)-Part",
+    "winner-name",                   # awarded contractor name(s)
 ]
 CPV_CODES = {
     "73200000": "R&D consultancy services",
@@ -197,6 +199,18 @@ def extract(raw):
     else:
         description = str(desc_raw) if desc_raw else ""
     description = (description or "")[:3000]
+
+    winner_raw = raw.get("winner-name") or {}
+    if isinstance(winner_raw, dict):
+        names = (winner_raw.get("eng") or winner_raw.get("ENG")
+                 or next(iter(winner_raw.values()), []))
+        if isinstance(names, str): names = [names]
+    elif isinstance(winner_raw, list):
+        names = winner_raw
+    else:
+        names = []
+    winner = " | ".join(str(n).strip() for n in names if n) or ""
+
     return {
         "pub_num":     pub,
         "title":       title,
@@ -212,6 +226,7 @@ def extract(raw):
         "duration":    duration,
         "country":     country,
         "description": description,
+        "winner":      winner,
     }
 
 
@@ -397,6 +412,106 @@ def ai_filter(live):
 
 
 # ═══════════════════════════════════════════════════════════════
+# AI FILTER — INTEL (awarded contracts, Haiku for cost)
+# ═══════════════════════════════════════════════════════════════
+
+TIER1_INTEL = [
+    "technology valorisation", "tech valorisation",
+    "technology commercialisation", "tech commercialisation",
+    "exploitation of results", "exploitation of project results",
+    "exploitation and dissemination", "dissemination and exploitation",
+    "eic accelerator", "eic transition", "eic pathfinder",
+    "eit digital", "eit manufacturing", "eit health",
+    "eit urban mobility", "eit food", "eit rawmaterials",
+    "venture building", "venture creation", "startup support services",
+    "startup acceleration", "deep tech",
+    "investor readiness", "investment readiness",
+    "go-to-market strategy", "go-to-market support",
+    "innovation ecosystem", "innovation management support",
+    "innovation support", "innovation advisory",
+]
+TIER2_INTEL = [
+    "horizon europe", "knowledge transfer", "technology transfer",
+    "spin-off", "spinout", "spin-out", "commercialisation", "valorisation",
+    "go-to-market", "market intelligence", "market study", "market analysis",
+    "competitive analysis", "technology assessment", "feasibility study",
+    "business model", "advisory services", "strategic advisory",
+    "fundraising support", "market entry", "technology roadmap",
+    "innovation strategy", "pitch deck", "investor outreach",
+    "partnership strategy", "commercial strategy", "scale-up",
+]
+
+def _raw_score_intel(row) -> int:
+    text = f"{row.get('title','')} {row.get('buyer','')} {row.get('description','')}".lower()
+    t1 = sum(1 for t in TIER1_INTEL if t in text)
+    t2 = sum(1 for t in TIER2_INTEL if t in text)
+    return 7 * t1 + 3 * t2
+
+
+def _parse_response(text: str) -> dict:
+    text = re.sub(r"```json\s*|\s*```", "", text).strip()
+    return json.loads(text)
+
+
+def ai_filter_intel(intel: pd.DataFrame) -> pd.DataFrame:
+    """Filter awarded-contract rows with keyword pre-filter + Haiku AI check."""
+    if intel.empty:
+        print("No intel rows to filter.")
+        return intel
+
+    if not ANTHROPIC_API_KEY:
+        print("No ANTHROPIC_API_KEY — skipping intel AI filter, keeping all intel rows.")
+        return intel
+
+    # Step 1: keyword pre-filter (keep raw_score >= 3 to limit Haiku calls)
+    scores = intel.apply(_raw_score_intel, axis=1)
+    candidates = intel[scores >= 3].copy()
+    skipped    = len(intel) - len(candidates)
+    print(f"\n{'='*64}")
+    print(f"Intel AI filter — {len(candidates)} candidates (skipped {skipped} below keyword threshold)")
+    print(f"{'='*64}\n")
+
+    if candidates.empty:
+        print("No intel candidates passed keyword threshold.")
+        return pd.DataFrame()
+
+    # Step 2: Haiku AI relevance check
+    client  = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+    results = []
+
+    for i, (_, row) in enumerate(candidates.iterrows()):
+        try:
+            resp = client.messages.create(
+                model="claude-haiku-4-5",
+                max_tokens=60,
+                messages=[{"role": "user", "content": (
+                    "Is this EU awarded contract relevant for a tech commercialisation "
+                    "consultancy (EIC/Horizon spinouts, investor readiness, go-to-market, deep tech)?\n"
+                    f"Title: {str(row['title'])[:200]}\n"
+                    f"Buyer: {str(row['buyer'])[:100]}\n"
+                    'Reply JSON only: {"relevant":true} or {"relevant":false}'
+                )}]
+            )
+            data = _parse_response(resp.content[0].text)
+            relevant = data.get("relevant", False)
+        except Exception as e:
+            print(f"  Row {i}: {e} — keeping row")
+            relevant = True  # keep on error to avoid silent drops
+
+        icon = "✅" if relevant else "❌"
+        print(f"  [{i+1:3d}/{len(candidates)}] {icon}  {str(row.get('title',''))[:65]}")
+        if relevant:
+            results.append(row)
+
+        if (i + 1) % 20 == 0:
+            print(f"  — {i+1}/{len(candidates)} done, {len(results)} relevant so far")
+
+    out = pd.DataFrame(results).reset_index(drop=True) if results else pd.DataFrame()
+    print(f"\n✅ Intel kept: {len(out)}  |  ❌ Removed: {len(candidates) - len(out)}\n")
+    return out
+
+
+# ═══════════════════════════════════════════════════════════════
 # SAVE & EXPORT
 # ═══════════════════════════════════════════════════════════════
 
@@ -424,7 +539,7 @@ def export(live, intel, filename="ted_tenders_ai.xlsx"):
     if live.empty and intel.empty: print("Nothing to export."); return
     live_cols  = ["deadline", "title", "buyer", "country", "value", "currency",
                   "duration", "cpv", "notice_type", "ai_reason", "description", "link"]
-    intel_cols = ["deadline", "title", "buyer", "country", "value", "currency",
+    intel_cols = ["deadline", "title", "buyer", "winner", "country", "value", "currency",
                   "notice_type", "link"]
     with pd.ExcelWriter(filename, engine="openpyxl") as w:
         for df, sheet, cols in [(live,  "AI Relevant",        live_cols),
@@ -501,7 +616,8 @@ def send_slack_digest(live, intel):
 
 if __name__ == "__main__":
     live, intel = fetch()
-    live = ai_filter(live)
+    live  = ai_filter(live)
+    intel = ai_filter_intel(intel)
     save_to_csv(live, intel)
     export(live, intel)
     send_slack_digest(live, intel)
