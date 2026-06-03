@@ -36,7 +36,8 @@ RESPONSE_FIELDS = [
     "estimated-value-cur-lot",       # currency (EUR, NOK etc)
     "submission-language",           # languages accepted
     "contract-duration-period-lot",  # contract length in months
-    "buyer-country",                 # ISO country code of buyer
+    "buyer-country", 
+    "winner-name", # ISO country code of buyer
 ]
 
 CPV_CODES = {
@@ -313,6 +314,16 @@ def extract(raw: dict) -> dict:
     else:
         description = str(desc_raw) if desc_raw else ""
     description = (description or "")[:3000]
+    winner_raw = raw.get("winner-name") or {}
+    if isinstance(winner_raw, dict):
+        names = (winner_raw.get("eng") or winner_raw.get("ENG")
+                 or next(iter(winner_raw.values()), []))
+        if isinstance(names, str): names = [names]
+    elif isinstance(winner_raw, list):
+        names = winner_raw
+    else:
+        names = []
+    winner = " | ".join(str(n).strip() for n in names if n) or ""  # ← ADDED
 
     return {
         "pub_num":     pub,
@@ -329,6 +340,7 @@ def extract(raw: dict) -> dict:
         "duration":    duration,
         "country":     country,
         "description": description,
+        "winner":      winner,
     }
 
 
