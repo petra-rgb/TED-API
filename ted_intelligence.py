@@ -1,8 +1,8 @@
-
-import requests, time, os
+import requests, time, os, json, re
 import pandas as pd
+import anthropic
 from datetime import datetime, timedelta, timezone
-
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ═══════════════════════════════════════════════════════════════
 # CONFIGURATION
@@ -11,139 +11,63 @@ from datetime import datetime, timedelta, timezone
 DAYS_BACK          = int(os.environ.get("DAYS_BACK", "1"))
 PAGE_SIZE          = 250
 MAX_PAGES          = 999
-MIN_SCORE          = 3
-DEADLINE_WARN_DAYS = 14
+AI_WORKERS         = 1
+DEADLINE_WARN_DAYS = 7
 
 TODAY           = datetime.now(timezone.utc)
 DEADLINE_CUTOFF = TODAY - timedelta(hours=24)
 
 SEARCH_URL        = "https://api.ted.europa.eu/v3/notices/search"
+CLAUDE_URL        = "https://api.anthropic.com/v1/messages"
+CLAUDE_MODEL      = "claude-sonnet-4-6"
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 SLACK_WEBHOOK_URL = os.environ.get("SLACK_WEBHOOK_URL", "")
 
+DM_PROFILE = """
+DevelopMinded is a technology commercialisation consultancy that supports deep tech spinouts,
+EIC/Horizon Europe grantees, and research-based ventures. Our core services are:
+- Technology commercialisation and exploitation of research results
+- Go-to-market strategy and market intelligence (market sizing, segmentation, competitive analysis)
+- Investment readiness and fundraising support (pitch decks, financial modelling, investor targeting)
+- EU tender bid preparation (e.g. HADEA, EIC, Horizon Europe procurements)
+- Partnership strategy and stakeholder outreach
+- Regulatory pathway analysis for market entry
+- Talent strategy and HR roadmap for scaling ventures
+- Evaluation and assessment of investor readiness, innovation programmes, and startup competitions
+
+Ideal clients: EIC Accelerator / EIC Transition / EIC Pathfinder grantees, university spinouts,
+deep tech companies (biotech, medtech, cleantech, agtech, defence tech) at TRL 4-7 needing
+commercial and strategic support to reach the market.
+
+NOT relevant: running clinical trials, lab/research execution, software development,
+infrastructure/construction management, policy research, academic surveys, open source
+maintenance, ecological studies, or procurements for physical goods/equipment.
+"""
 
 RESPONSE_FIELDS = [
     "publication-number",
     "notice-title",
     "buyer-name",
+    "buyer-country",
     "notice-type",
     "classification-cpv",
+    "description-lot",
+    "estimated-value-lot",
+    "estimated-value-cur-lot",
+    "submission-language",
+    "contract-duration-period-lot",
     "deadline-receipt-tender-date-lot",
     "BT-131(d)-Lot",
     "deadline-date-lot",
     "BT-13(t)-Part",
-    "description-lot",               # full lot description — used by AI filter
-    "estimated-value-lot",           # contract budget
-    "estimated-value-cur-lot",       # currency (EUR, NOK etc)
-    "submission-language",           # languages accepted
-    "contract-duration-period-lot",  # contract length in months
-    "buyer-country", 
-    "winner-name", # ISO country code of buyer
+    "winner-name",                   # awarded contractor name(s)
 ]
-
 CPV_CODES = {
     "73200000": "R&D consultancy services",
     "79410000": "Business & mgmt consultancy",
     "79411100": "Business development consultancy",
     "79419000": "Evaluation consultancy",
-    
 }
-
-CPV_PREFIXES = {
-    "7320":  "R&D consultancy",
-    "79410": "Business & mgmt consultancy",
-    
-}
-
-BROAD_SEARCH_TERMS = [
-    "commercialisation",
-    "valorisation",
-    "market study",
-    "market research",
-    "exploitation of results",
-    "startup",
-    "deep tech",
-    "horizon europe",
-    "eic accelerator",
-    "investor readiness",
-    "investment readiness",
-    "go-to-market",
-    "spin-off",
-    "deeptech",
-    "deep-tech",
-    "knowledge valorisation",      # ← add
-    "pre-commercial",              # ← add (catches PCP, pre-commercial procurement)
-    "deep tech",  
-]
-
-TIER1 = [
-    "technology valorisation", "tech valorisation",
-    "technology commercialisation", "tech commercialisation",
-    "commercialisation of research", "commercialisation of innovation",
-    "research commercialisation", "ip commercialisation",
-    "commercialisation support", "commercialisation services",
-    "commercialisation strategy", "commercialisation roadmap",
-    "exploitation of results", "exploitation of project results",
-    "exploitation and dissemination", "dissemination and exploitation",
-    "exploitation support", "exploitation services",
-    "technology transfer office", "ip to market",
-    "market uptake", "market adoption",
-    "technology-to-market", "tech-to-market",
-    "eic accelerator", "eic business acceleration", "eic bas",
-    "eic transition", "eic pathfinder", "eic t2m",
-    "business acceleration service",
-    "eit digital", "eit manufacturing", "eit health",
-    "eit urban mobility", "eit food", "eit rawmaterials",
-    "eurostars", "eureka cluster",
-    "diana programme", "diana accelerator",
-    "nato innovation fund", "defence innovation accelerator",
-    "venture building", "venture creation", "venture support",
-    "startup support services", "startup acceleration",
-    "deep tech",
-    "spinout support", "spin-out support",
-    "investor readiness", "investment readiness",
-    "scale-up support", "scaleup support",
-    "go-to-market strategy", "go-to-market support",
-    "product-market fit", "market validation",
-    "innovation ecosystem", "ecosystem orchestration",
-    "consortium commercialisation", "project commercialisation",
-    "innovation management support",
-    "innovation support", "innovation advisory",
-]
-
-TIER2 = [
-    "horizon europe", "knowledge transfer", "technology transfer",
-    "pre-commercial procurement", "innovation partnership",
-    "spin-off", "spinout", "spin-out",
-    "dual-use technology", "dual use technology", "dual use", "dual-use",
-    "commercialisation", "valorisation", "go-to-market",
-    "market intelligence", "market study", "market analysis",
-    "competitive analysis", "landscape analysis",
-    "technology assessment", "feasibility study",
-    "business model", "value proposition",
-    "stakeholder mapping", "ecosystem mapping",
-    "advisory services", "strategic advisory",
-    "fundraising support", "funding strategy",
-    "regulatory strategy", "regulatory navigation",
-    "market entry", "market access",
-    "technology roadmap", "innovation strategy",
-    "pitch deck", "financial modelling", "investor outreach",
-    "partnership strategy", "commercial strategy",
-    "due diligence", "scale-up",
-]
-
-BUYER_SIGNALS = [
-    "universit", "institute",
-    "accelerator", "incubator",
-    "eit", "eic", "diana",
-    "nwo", "anr", "bpifrance",
-    "vinnova", "innovate uk",
-    "enterprise ireland",
-    "rvo", "ffg", "ncbr",
-    "tekes", "business finland",
-    "eureka", "eurostars",
-    "interreg",
-]
-
 NEGATIVES = [
     "valorisation énergétique", "valorisation des déchets",
     "valorisation des boues", "valorisation des papiers",
@@ -155,56 +79,46 @@ NEGATIVES = [
     "commercialisation de locaux", "commercialisation du patrimoine",
     "commercialisation des actifs", "commercialisation immobilière",
     "gestion locative", "mandat de gestion",
-    "locaux commerciaux", "habitations à loyer",
-    "patrimoine résidentiel",
-    "noise control", "baulärm", "car park", "parking lot",
+    "locaux commerciaux", "habitations à loyer", "patrimoine résidentiel",
+    "noise control", "car park", "parking lot",
     "building maintenance", "cleaning service", "catering service",
     "waste management", "refuse collection", "sludge",
-    "urée", "déchets ménagers", "bacs roulants", "incineration",
     "fire alarm", "cctv installation", "security guard",
     "grounds maintenance", "road construction", "bridge construction",
     "electrical installation work", "plumbing",
-    "refrigerating and freezing", "cryogenic", "hardwarekomponenten",
-    "satellite hardware", "bodenstationsnetzwerk", "ground station network",
-    "suministro, instalación", "beschaffung von hardware",
+    "refrigerating and freezing", "cryogenic",
+    "satellite hardware", "ground station network",
     "site design services", "web portal development", "e-learning platform",
     "bridge cover", "bridge deck", "procurement of a bridge",
-    "design and execution of research", "implementation of research",
     "development of software", "software development services",
     "hardware development", "system integration",
-    "maritime network", "link integration network",
-    "cybersecurity research", "security score",
+    "cybersecurity research",
     "protected area management", "marine observation",
     "open source maintenance", "linux kernel", "open digital infrastructure",
-    "sovereign tech",
     "dna extraction", "sequencing", "genomics", "microbial", "cell culture",
     "chromatography", "mass spectrometry", "laboratory equipment",
-    "postal service", "postal services", "purchase of postal",
-    "noise pollution", "noise software", "noise measurement",
+    "postal service", "postal services",
+    "noise pollution", "noise measurement",
     "apartment defect", "defects remediation", "building defect",
     "energy lift", "grid connection works", "district heating",
     "ecological survey", "habitat survey", "biodiversity survey",
     "carbon certification", "blue carbon",
-    "web interviewing", "survey of elderly", "social mapping",
-    "questionnaire", "data collection survey",
+    "web interviewing", "questionnaire", "data collection survey",
     "clinical trial", "randomised controlled", "pharmaceutical supply",
     "it infrastructure", "network installation", "server procurement",
     "temporary staffing", "interim staff", "recruitment services",
     "translation services", "interpretation services",
     "communication campaign", "press office",
     "construction works", "civil engineering", "road works",
-    "evaluation of programme", "policy evaluation", "impact assessment",
-    "audit", "legal services", "communication services",
-    "event management", "training services",
 ]
 
+BROAD_SEARCH_TERMS = [
+    "commercialisation", "valorisation", "market study", "market research",
+    "exploitation of results", "startup", "deep tech", "horizon europe",
+    "eic accelerator", "investor readiness", "investment readiness",
+    "go-to-market", "spin-off", "deeptech", "deep-tech",
+]
 INTEL_TYPES = {"can-standard", "can-social", "can-desg", "can-tran", "can-modif"}
-
-
-# ═══════════════════════════════════════════════════════════════
-# HELPERS
-# ═══════════════════════════════════════════════════════════════
-
 def flat(v) -> str:
     if not v: return ""
     if isinstance(v, str): return v.strip()
@@ -239,40 +153,16 @@ def parse_deadline(raw):
     return None
 
 
-def score_notice(title: str, buyer: str, ntype: str,
-                 cpv_list: list = None, description: str = ""):
-    text        = f"{title} {buyer} {description}".lower()
-    buyer_low   = buyer.lower()
-    title_buyer = f"{title} {buyer}".lower()
-
-    if any(neg in title_buyer for neg in NEGATIVES):
-        return -999, "skip", [], []
-
-    t1 = [t for t in TIER1 if t in text]
-    t2 = [t for t in TIER2 if t in text]
-    buyer_boost = 2 if any(sig in buyer_low for sig in BUYER_SIGNALS) else 0
-    cpv_hits = [
-        c for c in (cpv_list or [])
-        if c in CPV_CODES or any(c.startswith(p) for p in CPV_PREFIXES)
-    ]
-    cpv_boost = 3 * len(cpv_hits)
-    sc = 7 * len(t1) + 3 * len(t2) + buyer_boost + cpv_boost
-    intel = ntype in INTEL_TYPES
-    if intel: sc -= 5
-    threshold = 1 if intel else MIN_SCORE   # intel just needs any keyword hit
-    if sc < threshold: return sc, "skip", t1, t2
-    
-
-    if ntype in INTEL_TYPES:           bucket = "Market intelligence"
-    elif t1:                           bucket = "Live opportunity"
-    elif len(t2) >= 2 and buyer_boost: bucket = "Live opportunity"
-    elif len(t2) >= 3:                 bucket = "Possible opportunity"
-    elif cpv_hits:                     bucket = "Possible opportunity"
-    else:                              bucket = "skip"
-    return sc, bucket, t1, t2
+def is_negative(title: str, buyer: str) -> bool:
+    text = f"{title} {buyer}".lower()
+    return any(neg in text for neg in NEGATIVES)
 
 
-def extract(raw: dict) -> dict:
+def get_bucket(ntype: str) -> str:
+    return "Market intelligence" if ntype in INTEL_TYPES else "Live opportunity"
+
+
+def extract(raw):
     pub   = flat(raw.get("publication-number")) or "—"
     title = flat(raw.get("notice-title"))       or "—"
     buyer = flat(raw.get("buyer-name"))         or "—"
@@ -285,25 +175,20 @@ def extract(raw: dict) -> dict:
     )
     cpv_raw  = raw.get("classification-cpv") or []
     cpv_list = list(dict.fromkeys(cpv_raw)) if isinstance(cpv_raw, list) else ([cpv_raw] if cpv_raw else [])
-
     val_raw  = raw.get("estimated-value-lot")
     value    = float(val_raw[0]) if isinstance(val_raw, list) and val_raw else None
     cur_raw  = raw.get("estimated-value-cur-lot")
     currency = cur_raw[0] if isinstance(cur_raw, list) and cur_raw else ""
-
-    lang_raw  = raw.get("submission-language") or []
+    lang_raw = raw.get("submission-language") or []
     languages = ", ".join(lang_raw) if isinstance(lang_raw, list) else str(lang_raw)
-
     dur_raw  = raw.get("contract-duration-period-lot")
     duration = "—"
     if isinstance(dur_raw, list) and dur_raw:
         d = dur_raw[0]
         if isinstance(d, dict):
             duration = f"{d.get('value','?')} {d.get('unit','').lower()}"
-
-    cty_raw = raw.get("buyer-country") or []
-    country = cty_raw[0] if isinstance(cty_raw, list) and cty_raw else ""
-
+    cty_raw  = raw.get("buyer-country") or []
+    country  = cty_raw[0] if isinstance(cty_raw, list) and cty_raw else ""
     desc_raw = raw.get("description-lot") or {}
     if isinstance(desc_raw, dict):
         description = (desc_raw.get("eng") or desc_raw.get("ENG") or
@@ -314,6 +199,7 @@ def extract(raw: dict) -> dict:
     else:
         description = str(desc_raw) if desc_raw else ""
     description = (description or "")[:3000]
+
     winner_raw = raw.get("winner-name") or {}
     if isinstance(winner_raw, dict):
         names = (winner_raw.get("eng") or winner_raw.get("ENG")
@@ -323,7 +209,7 @@ def extract(raw: dict) -> dict:
         names = winner_raw
     else:
         names = []
-    winner = " | ".join(str(n).strip() for n in names if n) or ""  # ← ADDED
+    winner = " | ".join(str(n).strip() for n in names if n) or ""
 
     return {
         "pub_num":     pub,
@@ -345,18 +231,17 @@ def extract(raw: dict) -> dict:
 
 
 # ═══════════════════════════════════════════════════════════════
-# STEP 1 — FETCH
+# FETCH
 # ═══════════════════════════════════════════════════════════════
 
 def make_query(days_back=DAYS_BACK):
-    since     = (datetime.now() - timedelta(days=days_back)).strftime("%Y%m%d")
-    cpv_codes = list(CPV_CODES.keys())
-    cpv_part  = " OR ".join(f'classification-cpv = "{c}"' for c in cpv_codes)
-    kw_part   = " OR ".join(f'FT ~ "{k}"' for k in BROAD_SEARCH_TERMS)
+    since    = (datetime.now() - timedelta(days=days_back)).strftime("%Y%m%d")
+    cpv_part = " OR ".join(f'classification-cpv = "{c}"' for c in CPV_CODES)
+    kw_part  = " OR ".join(f'FT ~ "{k}"' for k in BROAD_SEARCH_TERMS)
     return f"(({cpv_part}) OR ({kw_part})) AND publication-date >= {since}"
 
 
-def _fetch_page(payload) -> tuple:
+def _fetch_page(payload):
     for attempt in range(3):
         try:
             r = requests.post(SEARCH_URL, json=payload, timeout=60)
@@ -365,27 +250,24 @@ def _fetch_page(payload) -> tuple:
         if r.status_code == 200:
             d = r.json()
             return (d.get("notices", []), None,
-                    d.get("iterationNextToken"),
-                    d.get("totalNoticeCount", "?"))
+                    d.get("iterationNextToken"), d.get("totalNoticeCount", "?"))
         elif r.status_code == 429:
             wait = 35 * (attempt + 1)
-            print(f"\n  Rate limited — waiting {wait}s...")
+            print(f"Rate limited — waiting {wait}s...")
             time.sleep(wait)
         else:
             return None, f"{r.status_code}: {r.text[:100]}", None, "?"
     return None, "Max retries", None, "?"
 
 
-def fetch(days_back: int = DAYS_BACK) -> tuple[pd.DataFrame, pd.DataFrame]:
+def fetch(days_back=DAYS_BACK):
     print("=" * 64)
-    print(f"  TED Intelligence — DevelopMinded")
+    print(f"  TED Intelligence AI — DevelopMinded")
     print(f"  {datetime.now():%Y-%m-%d %H:%M UTC}")
     print(f"  Window: last {days_back} day(s)")
     print("=" * 64)
-
     query = make_query(days_back)
     print(f"\nQuery:\n{query}\n")
-    print("Fetching all pages...\n")
 
     all_notices, token, page, t0 = [], None, 0, time.time()
     while page < MAX_PAGES:
@@ -398,7 +280,7 @@ def fetch(days_back: int = DAYS_BACK) -> tuple[pd.DataFrame, pd.DataFrame]:
         }
         if token: payload["iterationNextToken"] = token
         notices, err, token, total = _fetch_page(payload)
-        if err: print(f"\n  Error: {err}"); break
+        if err: print(f"\nError: {err}"); break
         if not notices: break
         all_notices.extend(notices)
         page += 1
@@ -410,75 +292,272 @@ def fetch(days_back: int = DAYS_BACK) -> tuple[pd.DataFrame, pd.DataFrame]:
     if not all_notices: return pd.DataFrame(), pd.DataFrame()
 
     live_rows, intel_rows = [], []
-    n_expired = n_no_dl = n_future = n_neg = n_low = n_lang = 0
+    n_expired = n_no_dl = n_future = n_neg = n_lang = 0
+    english_countries = {"IRL", "GBR", "MLT", "CYP"}
 
     for raw in all_notices:
-        e     = extract(raw)
+        e = extract(raw)
+
+        # Language filter
         langs = e.get("languages", "").upper()
         if langs and "ENG" not in langs and "NLD" not in langs:
-            n_lang += 1
-            continue
+            if e.get("country", "") not in english_countries:
+                n_lang += 1; continue
 
-        dt = e["deadline_dt"]
-        if dt is None:             n_no_dl   += 1
-        elif dt < DEADLINE_CUTOFF: n_expired += 1; continue
-        else:                      n_future  += 1
+        # Deadline filter — skip for awarded contracts (their deadline is always in the past)
+        is_intel = e["notice_type"] in INTEL_TYPES
+        if not is_intel:
+            dt = e["deadline_dt"]
+            if dt is None:             n_no_dl   += 1
+            elif dt < DEADLINE_CUTOFF: n_expired += 1; continue
+            else:                      n_future  += 1
 
-        cpv_list = [c.strip() for c in e.get("cpv", "").split(",") if c.strip()]
-        sc, bucket, t1, t2 = score_notice(
-            e["title"], e["buyer"], e["notice_type"],
-            cpv_list, e.get("description", "")
-        )
-        if bucket == "skip":
-            if sc == -999: n_neg += 1
-            else:          n_low += 1
-            continue
+        # Negative filter
+        if is_negative(e["title"], e["buyer"]):
+            n_neg += 1; continue
 
-        row = {k: v for k, v in e.items() if k != "deadline_dt"}
-        row.update(score=sc, bucket=bucket,
-                   t1_hits=", ".join(t1), t2_hits=", ".join(t2[:4]))
+        bucket = get_bucket(e["notice_type"])
+        row    = {k: v for k, v in e.items() if k != "deadline_dt"}
+        row["bucket"] = bucket
         (live_rows if bucket != "Market intelligence" else intel_rows).append(row)
 
     def to_df(rows):
         if not rows: return pd.DataFrame()
-        return pd.DataFrame(rows).sort_values("score", ascending=False).reset_index(drop=True)
+        return pd.DataFrame(rows).reset_index(drop=True)
 
     live, intel = to_df(live_rows), to_df(intel_rows)
 
     print("=" * 64)
-    print(f"Filtered : {n_lang:,} non-English/Dutch language")
-    print(f"Deadline : {n_future:,} future | {n_no_dl:,} none | {n_expired:,} expired (dropped)")
-    print(f"Scoring  : {n_neg:,} negative | {n_low:,} below threshold")
-    print(f"Results  : 🟢 {len(live):,} live | 📊 {len(intel):,} market intel\n")
-
-    if not live.empty:
-        print("── LIVE OPPORTUNITIES ──")
-        print(live[["score","bucket","deadline","title","buyer","t1_hits"]].to_string(index=False))
-    if not intel.empty:
-        print("\n── MARKET INTELLIGENCE ──")
-        print(intel[["score","deadline","title","buyer","t1_hits"]].to_string(index=False))
-
+    print(f"Language : {n_lang:,} filtered (non-ENG/NLD)")
+    print(f"Deadline : {n_future:,} future | {n_no_dl:,} none | {n_expired:,} expired")
+    print(f"Negatives: {n_neg:,} dropped")
+    print(f"Sending  : {len(live):,} to Claude | {len(intel):,} market intel (skipped)\n")
     return live, intel
 
 
+# ═══════════════════════════════════════════════════════════════
+# AI FILTER
+# ═══════════════════════════════════════════════════════════════
+
+def _ask_claude(title, buyer, notice_text):
+    if not ANTHROPIC_API_KEY:
+        return True, "No API key — kept"
+    prompt = f"""You are evaluating whether a public procurement tender is relevant for DevelopMinded.
+
+{DM_PROFILE}
+
+TENDER TITLE: {title}
+BUYER: {buyer}
+NOTICE TEXT:
+{notice_text or "(not available — judge on title and buyer only)"}
+
+Is this tender genuinely relevant for DevelopMinded?
+Answer in exactly this format:
+RELEVANT: YES or NO
+REASON: one sentence"""
+    for attempt in range(4):
+        try:
+            r = requests.post(
+                CLAUDE_URL,
+                headers={"x-api-key":         ANTHROPIC_API_KEY,
+                         "anthropic-version": "2023-06-01",
+                         "content-type":      "application/json"},
+                json={"model": CLAUDE_MODEL, "max_tokens": 150,
+                      "messages": [{"role": "user", "content": prompt}]},
+                timeout=30,
+            )
+            if r.status_code == 200:
+                text     = r.json()["content"][0]["text"].strip()
+                relevant = "RELEVANT: YES" in text.upper()
+                reason   = next((l[7:].strip() for l in text.split("\n")
+                                 if l.upper().startswith("REASON:")), "")
+                return relevant, reason
+            elif r.status_code == 429:
+                wait = 30 * (attempt + 1)
+                print(f"    Rate limited — waiting {wait}s (attempt {attempt+1}/4)...")
+                time.sleep(wait)
+            else:
+                return True, f"API error {r.status_code} — kept"
+        except Exception as e:
+            return True, f"Error: {e} — kept"
+    return True, "Max retries (429) — kept"
+
+
+def _check_one(row):
+    rel, why = _ask_claude(
+        row.get("title", ""),
+        row.get("buyer", ""),
+        row.get("description", "") or ""
+    )
+    return {**row, "ai_relevant": rel, "ai_reason": why}
+
+
+def ai_filter(live):
+    if live.empty: print("Nothing to filter."); return live
+    print(f"\n{'='*64}\nAI filter — checking {len(live)} notices\n{'='*64}\n")
+    rows, results = live.to_dict("records"), []
+    with ThreadPoolExecutor(max_workers=AI_WORKERS) as pool:
+        futures = {pool.submit(_check_one, r): i for i, r in enumerate(rows)}
+        done = 0
+        for fut in as_completed(futures):
+            res = fut.result(); done += 1
+            icon = "✅" if res["ai_relevant"] else "❌"
+            print(f"  [{done:2d}/{len(rows)}] {icon}  {str(res.get('title',''))[:65]}")
+            results.append(res)
+    df      = pd.DataFrame(results)
+    kept    = df[df["ai_relevant"]].reset_index(drop=True)
+    removed = df[~df["ai_relevant"]]
+    print(f"\n✅ Kept {len(kept)}  |  ❌ Removed {len(removed)}")
+    for _, r in removed.iterrows():
+        print(f"  ❌ {str(r['title'])[:70]}\n     → {r['ai_reason']}")
+    return kept
+
 
 # ═══════════════════════════════════════════════════════════════
-# STEP 2 — EXPORT
+# AI FILTER — INTEL (awarded contracts, Haiku for cost)
 # ═══════════════════════════════════════════════════════════════
 
-def export(live: pd.DataFrame, intel: pd.DataFrame,
-           filename: str = "ted_tenders.xlsx"):
+TIER1_INTEL = [
+    "technology valorisation", "tech valorisation",
+    "technology commercialisation", "tech commercialisation",
+    "exploitation of results", "exploitation of project results",
+    "exploitation and dissemination", "dissemination and exploitation",
+    "eic accelerator", "eic transition", "eic pathfinder",
+    "eit digital", "eit manufacturing", "eit health",
+    "eit urban mobility", "eit food", "eit rawmaterials",
+    "venture building", "venture creation", "startup support services",
+    "startup acceleration", "deep tech",
+    "investor readiness", "investment readiness",
+    "go-to-market strategy", "go-to-market support",
+    "innovation ecosystem", "innovation management support",
+    "innovation support", "innovation advisory",
+]
+TIER2_INTEL = [
+    "horizon europe", "knowledge transfer", "technology transfer",
+    "spin-off", "spinout", "spin-out", "commercialisation", "valorisation",
+    "go-to-market", "market intelligence", "market study", "market analysis",
+    "competitive analysis", "technology assessment", "feasibility study",
+    "business model", "advisory services", "strategic advisory",
+    "fundraising support", "market entry", "technology roadmap",
+    "innovation strategy", "pitch deck", "investor outreach",
+    "partnership strategy", "commercial strategy", "scale-up",
+]
+
+def _raw_score_intel(row) -> int:
+    text = f"{row.get('title','')} {row.get('buyer','')} {row.get('description','')}".lower()
+    t1 = sum(1 for t in TIER1_INTEL if t in text)
+    t2 = sum(1 for t in TIER2_INTEL if t in text)
+    return 7 * t1 + 3 * t2
+
+
+def _parse_response(text: str) -> dict:
+    text = re.sub(r"```json\s*|\s*```", "", text).strip()
+    return json.loads(text)
+
+
+def ai_filter_intel(intel: pd.DataFrame) -> pd.DataFrame:
+    """Filter awarded-contract rows with keyword pre-filter + Haiku AI check."""
+    if intel.empty:
+        print("No intel rows to filter.")
+        return intel
+
+    if not ANTHROPIC_API_KEY:
+        print("No ANTHROPIC_API_KEY — skipping intel AI filter, keeping all intel rows.")
+        return intel
+
+    # Step 1: keyword pre-filter (keep raw_score >= 3 to limit Haiku calls)
+    scores = intel.apply(_raw_score_intel, axis=1)
+    candidates = intel[scores >= 3].copy()
+    skipped    = len(intel) - len(candidates)
+    print(f"\n{'='*64}")
+    print(f"Intel AI filter — {len(candidates)} candidates (skipped {skipped} below keyword threshold)")
+    print(f"{'='*64}\n")
+
+    if candidates.empty:
+        print("No intel candidates passed keyword threshold.")
+        return pd.DataFrame()
+
+    # Step 2: Haiku AI relevance check
+    client  = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+    results = []
+
+    for i, (_, row) in enumerate(candidates.iterrows()):
+        try:
+            resp = client.messages.create(
+                model="claude-haiku-4-5",
+                max_tokens=60,
+                messages=[{"role": "user", "content": (
+                    "Is this EU awarded contract relevant for a tech commercialisation "
+                    "consultancy (EIC/Horizon spinouts, investor readiness, go-to-market, deep tech)?\n"
+                    f"Title: {str(row['title'])[:200]}\n"
+                    f"Buyer: {str(row['buyer'])[:100]}\n"
+                    'Reply JSON only: {"relevant":true} or {"relevant":false}'
+                )}]
+            )
+            data = _parse_response(resp.content[0].text)
+            relevant = data.get("relevant", False)
+        except Exception as e:
+            print(f"  Row {i}: {e} — keeping row")
+            relevant = True  # keep on error to avoid silent drops
+
+        icon = "✅" if relevant else "❌"
+        print(f"  [{i+1:3d}/{len(candidates)}] {icon}  {str(row.get('title',''))[:65]}")
+        if relevant:
+            results.append(row)
+
+        if (i + 1) % 20 == 0:
+            print(f"  — {i+1}/{len(candidates)} done, {len(results)} relevant so far")
+
+    out = pd.DataFrame(results).reset_index(drop=True) if results else pd.DataFrame()
+    print(f"\n✅ Intel kept: {len(out)}  |  ❌ Removed: {len(candidates) - len(out)}\n")
+    return out
+
+
+# ═══════════════════════════════════════════════════════════════
+# SAVE & EXPORT
+# ═══════════════════════════════════════════════════════════════
+
+def save_to_csv(live, intel, csv_file="ted_results_ai.csv",
+                closed_ai_file="ted_closed_relevant.csv"):
+    if live.empty and intel.empty: print("Nothing to save."); return
+    today  = datetime.now().strftime("%Y-%m-%d")
+
+    # Save live (AI-filtered open tenders) to main AI results file
+    if not live.empty:
+        new_rows = live.copy(); new_rows["fetched_date"] = today
+        try:
+            existing = pd.read_csv(csv_file)
+            combined = pd.concat([existing, new_rows], ignore_index=True)
+            combined = combined.drop_duplicates(subset=["pub_num"], keep="last")
+        except FileNotFoundError:
+            combined = new_rows
+        combined = combined.sort_values("fetched_date", ascending=False).reset_index(drop=True)
+        combined.to_csv(csv_file, index=False)
+        print(f"Saved → {csv_file}  ({len(combined):,} total rows, {len(new_rows)} new today)")
+
+    # Save AI-filtered intel (awarded contracts) to dedicated closed file
+    if not intel.empty:
+        new_intel = intel.copy(); new_intel["fetched_date"] = today
+        try:
+            existing_closed = pd.read_csv(closed_ai_file)
+            combined_closed = pd.concat([existing_closed, new_intel], ignore_index=True)
+            combined_closed = combined_closed.drop_duplicates(subset=["pub_num"], keep="last")
+        except FileNotFoundError:
+            combined_closed = new_intel
+        combined_closed = combined_closed.sort_values("fetched_date", ascending=False).reset_index(drop=True)
+        combined_closed.to_csv(closed_ai_file, index=False)
+        print(f"Saved → {closed_ai_file}  ({len(combined_closed):,} total rows, {len(new_intel)} new today)")
+
+
+def export(live, intel, filename="ted_tenders_ai.xlsx"):
     if live.empty and intel.empty: print("Nothing to export."); return
-    live_cols  = ["score", "bucket", "deadline", "title", "buyer", "country",
-                  "value", "currency", "duration", "languages",
-                  "notice_type", "t1_hits", "t2_hits", "description", "link"]
-    intel_cols = ["score", "deadline", "title", "buyer", "country",
-                  "value", "currency", "notice_type", "t1_hits", "link"]
+    live_cols  = ["deadline", "title", "buyer", "country", "value", "currency",
+                  "duration", "cpv", "notice_type", "ai_reason", "description", "link"]
+    intel_cols = ["deadline", "title", "buyer", "winner", "country", "value", "currency",
+                  "notice_type", "link"]
     with pd.ExcelWriter(filename, engine="openpyxl") as w:
-        for df, sheet, cols in [
-            (live,  "Live Opportunities",  live_cols),
-            (intel, "Market Intelligence", intel_cols),
-        ]:
+        for df, sheet, cols in [(live,  "AI Relevant",        live_cols),
+                                 (intel, "Market Intelligence", intel_cols)]:
             if df.empty: continue
             out = df[[c for c in cols if c in df.columns]]
             out.to_excel(w, index=False, sheet_name=sheet)
@@ -486,70 +565,27 @@ def export(live: pd.DataFrame, intel: pd.DataFrame,
             for col in ws.columns:
                 ws.column_dimensions[col[0].column_letter].width = min(
                     max(len(str(c.value or "")) for c in col) + 4, 60)
-    print(f"Exported → {filename}")
-    print(f"  Live Opportunities  : {len(live)}")
-    print(f"  Market Intelligence : {len(intel)}")
-    return filename
+    print(f"Exported → {filename}  |  AI Relevant: {len(live)}  |  Intel: {len(intel)}")
 
 
 # ═══════════════════════════════════════════════════════════════
-# STEP 3 — SAVE TO CSV
+# SLACK
 # ═══════════════════════════════════════════════════════════════
 
-def save_to_csv(live: pd.DataFrame, intel: pd.DataFrame,
-                csv_file: str = "ted_results.csv"):
-    if live.empty and intel.empty:
-        print("Nothing to save.")
-        return
-    today  = datetime.now().strftime("%Y-%m-%d")
-    frames = []
-    if not live.empty:
-        live_out = live.copy(); live_out["fetched_date"] = today
-        frames.append(live_out)
-    if not intel.empty:
-        intel_out = intel.copy(); intel_out["fetched_date"] = today
-        frames.append(intel_out)
-
-    new_rows = pd.concat(frames, ignore_index=True)
-    try:
-        existing = pd.read_csv(csv_file)
-        combined = pd.concat([existing, new_rows], ignore_index=True)
-        combined = combined.drop_duplicates(subset=["pub_num"], keep="last")
-    except FileNotFoundError:
-        combined = new_rows
-
-    combined = combined.sort_values(
-        ["fetched_date", "score"], ascending=[False, False]
-    ).reset_index(drop=True)
-    combined.to_csv(csv_file, index=False)
-    print(f"Saved → {csv_file}  ({len(combined):,} total rows, {len(new_rows)} new today)")
-
-
-# ═══════════════════════════════════════════════════════════════
-# STEP 4 — SLACK DIGEST
-# ═══════════════════════════════════════════════════════════════
-
-def send_slack_digest(live: pd.DataFrame, intel: pd.DataFrame):
+def send_slack_digest(live, intel):
     if not SLACK_WEBHOOK_URL:
-        print("No SLACK_WEBHOOK_URL set — skipping Slack digest.")
+        print("No SLACK_WEBHOOK_URL — skipping Slack.")
         return
-
     today           = datetime.now().strftime("%Y-%m-%d")
     deadline_cutoff = (datetime.now() + timedelta(days=DEADLINE_WARN_DAYS)).strftime("%Y-%m-%d")
-
     blocks = [
-        {"type": "header",
-         "text": {"type": "plain_text", "text": f"🔍 TED Tender Intelligence — {today}"}},
-        {"type": "section",
-         "text": {"type": "mrkdwn", "text": (
-             f"*{len(live)}* live/possible opportunities  |  "
-             f"*{len(intel)}* awarded contracts"
-         )}},
+        {"type": "header", "text": {"type": "plain_text",
+            "text": f"TED AI Intelligence — {today}"}},
+        {"type": "section", "text": {"type": "mrkdwn",
+            "text": f"*{len(live)}* AI-relevant opportunities  |  *{len(intel)}* market intel"}},
         {"type": "divider"},
     ]
-
-    urgent_pub_nums = set()
-
+    urgent_pubs = set()
     if not live.empty and "deadline" in live.columns:
         urgent = live[
             (live["deadline"] != "—") &
@@ -560,41 +596,30 @@ def send_slack_digest(live: pd.DataFrame, intel: pd.DataFrame):
             blocks.append({"type": "section", "text": {"type": "mrkdwn",
                 "text": f":alarm_clock: *Deadlines within {DEADLINE_WARN_DAYS} days*"}})
             for _, r in urgent.iterrows():
-                urgent_pub_nums.add(r.get("pub_num", ""))
+                urgent_pubs.add(r.get("pub_num", ""))
                 blocks.append({"type": "section", "text": {"type": "mrkdwn",
-                    "text": (
-                        f"*<{r.get('link','')}|{str(r['title'])[:80]}>*\n"
-                        f"Buyer: {r['buyer']}  |  Score: {r['score']}  |  "
-                        f"Deadline: *{r['deadline']}*"
-                    )}})
-            blocks.append({"type": "divider"})
-
+                    "text": (f"*<{r.get('link','')}|{str(r['title'])[:80]}>*\n"
+                             f"Buyer: {r['buyer']}  |  Deadline: {r['deadline']}\n"
+                             f"_{r.get('ai_reason', '')}_")}})
     if not live.empty:
-        top = live[~live["pub_num"].isin(urgent_pub_nums)].head(5)
+        top = live[~live["pub_num"].isin(urgent_pubs)].head(5)
         if not top.empty:
             blocks.append({"type": "section", "text": {"type": "mrkdwn",
-                "text": ":green_circle: *Top Opportunities*"}})
+                "text": ":green_circle: *Top AI-Relevant Opportunities*"}})
             for _, r in top.iterrows():
-                dl  = r.get("deadline", "—")
-                val = f"  |  €{r['value']:,.0f}" if pd.notna(r.get("value")) else ""
                 blocks.append({"type": "section", "text": {"type": "mrkdwn",
-                    "text": (
-                        f"*<{r.get('link','')}|{str(r['title'])[:80]}>*\n"
-                        f"Buyer: {r['buyer']}  |  Score: {r['score']}  |  "
-                        f"Deadline: {dl}{val}"
-                    )}})
-
-    blocks.append({"type": "divider"})
-    blocks.append({"type": "context", "elements": [
-        {"type": "mrkdwn", "text": "DevelopMinded TED Intelligence — automated daily fetch"}
-    ]})
-
+                    "text": (f"*<{r.get('link','')}|{str(r['title'])[:80]}>*\n"
+                             f"Buyer: {r['buyer']}  |  Deadline: {r.get('deadline','—')}\n"
+                             f"_{r.get('ai_reason', '')}_")}})
+    blocks += [
+        {"type": "divider"},
+        {"type": "context", "elements": [
+            {"type": "mrkdwn", "text": "DevelopMinded TED AI Intelligence — automated daily fetch"}
+        ]},
+    ]
     try:
         r = requests.post(SLACK_WEBHOOK_URL, json={"blocks": blocks}, timeout=15)
-        if r.status_code == 200:
-            print("Slack digest sent ✓")
-        else:
-            print(f"Slack error {r.status_code}: {r.text}")
+        print("Slack digest sent ✓" if r.status_code == 200 else f"Slack error {r.status_code}: {r.text}")
     except Exception as e:
         print(f"Slack send failed: {e}")
 
@@ -605,6 +630,9 @@ def send_slack_digest(live: pd.DataFrame, intel: pd.DataFrame):
 
 if __name__ == "__main__":
     live, intel = fetch()
+    live  = ai_filter(live)
+    intel = ai_filter_intel(intel)
     save_to_csv(live, intel)
     export(live, intel)
     send_slack_digest(live, intel)
+
