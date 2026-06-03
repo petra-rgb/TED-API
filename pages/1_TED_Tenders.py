@@ -114,21 +114,15 @@ closed        = df[df["bucket"] == "Market intelligence"].copy()
 ai_live     = pd.DataFrame()
 ai_planning = pd.DataFrame()
 ai_open_    = pd.DataFrame()
-ai_intel    = pd.DataFrame()
 if not df_ai.empty:
     ai_lp       = df_ai[df_ai["bucket"].isin(["Live opportunity", "Possible opportunity"])].copy()
     ai_live     = ai_lp.copy()
     ai_planning = ai_lp[ai_lp["deadline"] == "—"].copy()
     ai_open_    = ai_lp[ai_lp["deadline"] != "—"].copy()
-    ai_intel    = df_ai[df_ai["bucket"] == "Market intelligence"].copy()
 
-# Merge all AI-sourced closed rows (manual backfill + future daily runs)
-ai_closed_sources = [s for s in [df_closed_ai, ai_intel] if not s.empty]
-ai_closed_all = (
-    pd.concat(ai_closed_sources, ignore_index=True)
-    .drop_duplicates(subset=["pub_num"], keep="last")
-    if ai_closed_sources else pd.DataFrame()
-)
+# AI closed = ted_closed_relevant.csv only
+# (daily runs append to that file via ai_filter_intel → save_to_csv)
+ai_closed_all = df_closed_ai.copy() if not df_closed_ai.empty else pd.DataFrame()
 
 # Build merged closed: keyword rows + AI-only rows (🤖 prefix on AI titles)
 kw_pubs = set(closed["pub_num"].astype(str)) if not closed.empty else set()
