@@ -44,9 +44,10 @@ st.markdown("""
 
 st.markdown("# TED Tenders")
 
-CSV_FILE       = "ted_results.csv"
-AI_CSV_FILE    = "ted_results_ai.csv"
-WARN_DAYS      = 14
+CSV_FILE          = "ted_results.csv"
+AI_CSV_FILE       = "ted_results_ai.csv"
+CLOSED_AI_FILE    = "ted_closed_relevant.csv"
+WARN_DAYS         = 14
 STATUS_OPTIONS = ["Reviewed", "Not a match", "In process of applying"]
 
 
@@ -62,8 +63,9 @@ def load_csv_data(file_path: str) -> pd.DataFrame:
     except FileNotFoundError:
         return pd.DataFrame()
 
-df    = load_csv_data(CSV_FILE)
-df_ai = load_csv_data(AI_CSV_FILE)
+df          = load_csv_data(CSV_FILE)
+df_ai       = load_csv_data(AI_CSV_FILE)
+df_closed_ai = load_csv_data(CLOSED_AI_FILE)
 
 # filter bad AI rows after loading
 if not df_ai.empty and "ai_reason" in df_ai.columns:
@@ -107,17 +109,40 @@ warn_cutoff = (pd.Timestamp.now() + pd.Timedelta(days=WARN_DAYS)).strftime("%Y-%
 live_possible = df[df["bucket"].isin(["Live opportunity", "Possible opportunity"])].copy()
 planning      = live_possible[live_possible["deadline"] == "—"].copy()
 open_         = live_possible[live_possible["deadline"] != "—"].copy()
-closed = df[df["bucket"] == "Market intelligence"].copy()
-
+closed        = df[df["bucket"] == "Market intelligence"].copy()
 
 ai_live     = pd.DataFrame()
 ai_planning = pd.DataFrame()
 ai_open_    = pd.DataFrame()
+ai_intel    = pd.DataFrame()
 if not df_ai.empty:
     ai_lp       = df_ai[df_ai["bucket"].isin(["Live opportunity", "Possible opportunity"])].copy()
     ai_live     = ai_lp.copy()
     ai_planning = ai_lp[ai_lp["deadline"] == "—"].copy()
     ai_open_    = ai_lp[ai_lp["deadline"] != "—"].copy()
+    ai_intel    = df_ai[df_ai["bucket"] == "Market intelligence"].copy()
+
+# Merge all AI-sourced closed rows (manual backfill + future daily runs)
+ai_closed_sources = [s for s in [df_closed_ai, ai_intel] if not s.empty]
+ai_closed_all = (
+    pd.concat(ai_closed_sources, ignore_index=True)
+    .drop_duplicates(subset=["pub_num"], keep="last")
+    if ai_closed_sources else pd.DataFrame()
+)
+
+# Build merged closed: keyword rows + AI-only rows (🤖 prefix on AI titles)
+kw_pubs = set(closed["pub_num"].astype(str)) if not closed.empty else set()
+if not ai_closed_all.empty:
+    closed_kw = closed.copy()
+    # mark keyword rows that also appear in AI
+    ai_pubs_closed = set(ai_closed_all["pub_num"].astype(str))
+    closed_kw.loc[closed_kw["pub_num"].astype(str).isin(ai_pubs_closed), "title"] = \
+        "🤖 " + closed_kw.loc[closed_kw["pub_num"].astype(str).isin(ai_pubs_closed), "title"].astype(str)
+    ai_only_closed = ai_closed_all[~ai_closed_all["pub_num"].astype(str).isin(kw_pubs)].copy()
+    ai_only_closed["title"] = "🤖 " + ai_only_closed["title"].astype(str)
+    all_closed = pd.concat([closed_kw, ai_only_closed], ignore_index=True)
+else:
+    all_closed = closed.copy()
 
 all_planning = pd.concat([planning, ai_planning]).drop_duplicates(subset=["pub_num"]) if not ai_planning.empty else planning
 all_open     = pd.concat([open_, ai_open_]).drop_duplicates(subset=["pub_num"]) if not ai_open_.empty else open_
@@ -146,7 +171,7 @@ st.caption(f"Last updated: **{last_run_str}**")
 k1, k2, k3, k4, k5, k6, k7 = st.columns(7)
 k1.metric("Planning",             len(all_planning))
 k2.metric("Open",                 len(all_open_active))
-k3.metric("Closed", len(closed))
+k3.metric("Closed", len(all_closed))
 k4.metric(f"Deadline within {WARN_DAYS}d", urgent_count)
 k5.metric("AI Relevant",          len(ai_live_active))
 k6.metric("In process",           in_process_count)
@@ -430,7 +455,7 @@ reviewed_cols = [c for c in
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
     f"Planning ({len(all_planning)})",
     f"Open ({len(all_open_active)})",
-    f"Closed ({len(closed)})",
+    f"Closed ({len(all_closed)})",
     f"Reviewed ({len(reviewed_pubs)})",
     f"AI Filtered ({len(ai_live_active)})",
 ])
@@ -494,10 +519,11 @@ with tab2:
 
 
 with tab3:
-    if closed.empty:
+    if all_closed.empty:
         st.info("No closed/awarded contracts yet.")
     else:
-        view = closed.copy()
+        ai_closed_count = all_closed["title"].astype(str).str.startswith("🤖").sum()
+        view = all_closed.copy()
         if search:
             mask = (
                 view["title"].str.contains(search, case=False, na=False) |
@@ -510,7 +536,8 @@ with tab3:
         if hide_reviewed:
             view = view[~view["pub_num"].astype(str).isin(reviewed_pubs)]
 
-        st.caption(f"Showing **{len(view)}** awarded contracts")
+        ai_note = f" · {ai_closed_count} 🤖 AI-verified" if ai_closed_count else ""
+        st.caption(f"Showing **{len(view)}** awarded contracts{ai_note}")
 
         if "value" in view.columns and view["value"].notna().any():
             v1, v2, v3 = st.columns(3)
