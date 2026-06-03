@@ -21,7 +21,7 @@ st.markdown("""
         border: none !important;
         border-radius: 6px !important;
     }
-    .stSlider [data-baseweb="slider"] [role="slider"] {x
+    .stSlider [data-baseweb="slider"] [role="slider"] {
         background-color: #F5C518 !important;
     }
     a { color: #F5C518 !important; }
@@ -418,7 +418,7 @@ base_cols = [c for c in
     if c in df.columns or c == "reviewed"]
 
 intel_cols = [c for c in
-    ["title", "buyer", "country", "value", "link"]
+    ["title", "buyer", "winner", "country", "value", "link"]
     if c in df.columns]
 
 reviewed_cols = [c for c in
@@ -523,8 +523,9 @@ with tab3:
         st.dataframe(
             prep_description(view)[display_cols].reset_index(drop=True),
             column_config={
-                "link":  st.column_config.LinkColumn("Link", display_text="View"),
-                "value": st.column_config.NumberColumn("Value", format="€%,.0f"),
+                "link":   st.column_config.LinkColumn("Link", display_text="View"),
+                "value":  st.column_config.NumberColumn("Value", format="€%,.0f"),
+                "winner": st.column_config.TextColumn("Winner", width="medium"),
             },
             use_container_width=True,
             height=520,
