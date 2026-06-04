@@ -40,7 +40,7 @@ deep tech companies (biotech, medtech, cleantech, agtech, defence tech) at TRL 4
 commercial and strategic support to reach the market.
 
 NOT relevant: running clinical trials, lab/research execution, software development,
-infrastructure/construction management, policy research, academic surveys, open source
+infrastructure/construction management, academic surveys, open source
 maintenance, ecological studies, or procurements for physical goods/equipment.
 """
 
