@@ -1,0 +1,33 @@
+[project]
+name = "ted-api"
+version = "0.1.0"
+description = "EU tender intelligence (TED + EIT KICs) with Claude filtering and a Streamlit UI"
+requires-python = ">=3.11"
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+extend-exclude = ["tests/fixtures"]
+
+[tool.ruff.lint]
+# E/W pycodestyle, F pyflakes, B bugbear, C90 mccabe complexity,
+# UP pyupgrade, SIM simplify, PERF perflint, RUF ruff-specific, I import-sort
+select = ["E", "F", "W", "B", "C90", "UP", "SIM", "PERF", "RUF", "I"]
+ignore = [
+    "E741",   # ambiguous variable name (l) — used intentionally in a few comprehensions
+    "RUF001", # ambiguous unicode in strings — the data legitimately contains é, ›, —
+    "RUF002",
+    "RUF003",
+]
+
+[tool.ruff.lint.mccabe]
+# Hard ceiling for cyclomatic complexity — the production-readiness target.
+max-complexity = 15
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+# radon has no config file section; complexity is gated in CI via:
+#   radon cc --min C --total-average *.py pages/*.py
+# and any block at grade C (CC > 15) fails the build.

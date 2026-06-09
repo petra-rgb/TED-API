@@ -1,0 +1,102 @@
+[
+  {
+    "publication-number": "0001-2026",
+    "notice-title": {"eng": "Market study for deep tech commercialisation"},
+    "buyer-name": {"eng": "EIC Agency"},
+    "buyer-country": ["BEL"],
+    "notice-type": "cn-standard",
+    "classification-cpv": ["73200000", "79410000", "73200000"],
+    "description-lot": {"eng": "We seek go-to-market support for spinouts."},
+    "estimated-value-lot": [50000.0],
+    "estimated-value-cur-lot": ["EUR"],
+    "submission-language": ["ENG"],
+    "contract-duration-period-lot": [{"value": 12, "unit": "MONTH"}],
+    "deadline-receipt-tender-date-lot": "2099-12-31T00:00:00+00:00",
+    "winner-name": {}
+  },
+  {
+    "publication-number": "0002-2026",
+    "notice-title": "Award of innovation advisory services",
+    "buyer-name": "Horizon Agency",
+    "buyer-country": ["DEU"],
+    "notice-type": "can-standard",
+    "classification-cpv": "79419000",
+    "description-lot": ["Awarded contract for advisory."],
+    "estimated-value-lot": null,
+    "estimated-value-cur-lot": [],
+    "submission-language": ["ENG"],
+    "deadline-receipt-tender-date-lot": "2000-01-01T00:00:00+00:00",
+    "winner-name": {"eng": ["BigCorp Consulting", "Second Winner"]}
+  },
+  {
+    "publication-number": "0003-2026",
+    "notice-title": "Waste management services for the city",
+    "buyer-name": "City of Example",
+    "buyer-country": ["NLD"],
+    "notice-type": "cn-standard",
+    "classification-cpv": ["90500000"],
+    "description-lot": {"eng": "Refuse collection."},
+    "submission-language": ["ENG"],
+    "deadline-receipt-tender-date-lot": "2099-12-31T00:00:00+00:00",
+    "winner-name": {}
+  },
+  {
+    "publication-number": "0004-2026",
+    "notice-title": "Etude de marche regionale",
+    "buyer-name": "Region X",
+    "buyer-country": ["FRA"],
+    "notice-type": "cn-standard",
+    "classification-cpv": ["79410000"],
+    "description-lot": {"fra": "Etude de marche."},
+    "submission-language": ["FRA"],
+    "deadline-receipt-tender-date-lot": "2099-12-31T00:00:00+00:00",
+    "winner-name": {}
+  },
+  {
+    "publication-number": "0005-2026",
+    "notice-title": "Spin-off support programme",
+    "buyer-name": "Enterprise Ireland",
+    "buyer-country": ["IRL"],
+    "notice-type": "cn-standard",
+    "classification-cpv": ["79411100"],
+    "description-lot": {"eng": "Support for university spinouts."},
+    "submission-language": ["GLE"],
+    "deadline-receipt-tender-date-lot": "2099-12-31T00:00:00+00:00",
+    "winner-name": {}
+  },
+  {
+    "publication-number": "0006-2026",
+    "notice-title": "Investment readiness programme",
+    "buyer-name": "Innovation Fund",
+    "buyer-country": ["NLD"],
+    "notice-type": "cn-standard",
+    "classification-cpv": ["79410000"],
+    "description-lot": {"eng": "Investor readiness coaching."},
+    "submission-language": ["ENG"],
+    "winner-name": {}
+  },
+  {
+    "publication-number": "0007-2026",
+    "notice-title": {"fra": "Conseil strategique"},
+    "buyer-name": {"eng": "Agence FR"},
+    "buyer-country": ["FRA"],
+    "notice-type": "cn-standard",
+    "classification-cpv": ["79410000"],
+    "description-lot": {"fra": "Description francaise du marche."},
+    "submission-language": ["ENG"],
+    "deadline-receipt-tender-date-lot": "2099-12-31T00:00:00+00:00",
+    "winner-name": "Single Winner Co"
+  },
+  {
+    "publication-number": "0008-2026",
+    "notice-title": "Technology transfer evaluation",
+    "buyer-name": "EIT Headquarters",
+    "buyer-country": ["HUN"],
+    "notice-type": "can-tran",
+    "classification-cpv": ["73200000"],
+    "description-lot": {"eng": "Evaluation of technology transfer outcomes."},
+    "submission-language": ["ENG"],
+    "deadline-receipt-tender-date-lot": "2099-12-31T00:00:00+00:00",
+    "winner-name": ["Alpha Ltd", "  "]
+  }
+]

@@ -1,0 +1,80 @@
+{
+  "climate_kic": [
+    {
+      "deadline": "26 May 2026",
+      "description": "The new deadline for submitting applications is 26 May 2026.",
+      "id": "52a3f761873e",
+      "source": "EIT Climate-KIC",
+      "title": "RFP: Climate adaptation study",
+      "url": "https://ck.example/docs/rfp1.pdf"
+    },
+    {
+      "deadline": "",
+      "description": "Proposals welcome.",
+      "id": "ee1fc1709f8b",
+      "source": "EIT Climate-KIC",
+      "title": "RFP: Net zero advisory",
+      "url": "https://ck.example/docs/rfp2.pdf"
+    }
+  ],
+  "eit_culture_creativity": [
+    {
+      "deadline": "May 13, 2026",
+      "description": "",
+      "id": "1a7b7db5549b",
+      "source": "EIT Culture & Creativity",
+      "title": "Culture grant",
+      "url": "https://cc.example/your-opportunities/request-proposals/culture-1"
+    }
+  ],
+  "eit_food": [
+    {
+      "deadline": "Deadline 2026-07-01",
+      "description": "Deadline 2026-07-01",
+      "id": "efc04d261b48",
+      "source": "EIT Food",
+      "title": "Open call: Food innovation specialist",
+      "url": "https://food.example/calls/food1"
+    }
+  ],
+  "eit_innoenergy": [
+    {
+      "deadline": "04.05.2026",
+      "description": "",
+      "id": "27293ca8416e",
+      "source": "EIT InnoEnergy",
+      "title": "Catering services for TBB 2026",
+      "url": "https://ie.example/docs/inno1.pdf"
+    }
+  ],
+  "eit_raw_materials": [
+    {
+      "deadline": "30.04.2026",
+      "description": "",
+      "id": "a1f814868858",
+      "source": "EIT RawMaterials",
+      "title": "Call for offers: critical materials study",
+      "url": "https://rm.example/call-for-offers/raw-1"
+    }
+  ],
+  "eit_urban_mobility": [
+    {
+      "deadline": "20 May 2026",
+      "description": "",
+      "id": "b140423e2d5f",
+      "source": "EIT Urban Mobility",
+      "title": "RFP Mobility data platform",
+      "url": "https://um.example/request-for-proposal/mobility-data/"
+    }
+  ],
+  "eit_water": [
+    {
+      "deadline": "Deadline 15 June 2026",
+      "description": "",
+      "id": "f22fcd9f5bdd",
+      "source": "EIT Water",
+      "title": "Open call: water tech pilot",
+      "url": "https://water.example/opportunities/water-1"
+    }
+  ]
+}

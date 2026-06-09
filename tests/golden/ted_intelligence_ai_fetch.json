@@ -1,0 +1,91 @@
+{
+  "intel": [
+    {
+      "bucket": "Market intelligence",
+      "buyer": "EIT Headquarters",
+      "country": "HUN",
+      "cpv": "73200000",
+      "currency": "",
+      "deadline": "2099-12-31",
+      "description": "Evaluation of technology transfer outcomes.",
+      "duration": "—",
+      "languages": "ENG",
+      "link": "https://ted.europa.eu/en/notice/-/detail/0008-2026",
+      "notice_type": "can-tran",
+      "pub_num": "0008-2026",
+      "title": "Technology transfer evaluation",
+      "value": null,
+      "winner": "Alpha Ltd | "
+    }
+  ],
+  "live": [
+    {
+      "bucket": "Live opportunity",
+      "buyer": "EIC Agency",
+      "country": "BEL",
+      "cpv": "73200000, 79410000",
+      "currency": "EUR",
+      "deadline": "2099-12-31",
+      "description": "We seek go-to-market support for spinouts.",
+      "duration": "12 month",
+      "languages": "ENG",
+      "link": "https://ted.europa.eu/en/notice/-/detail/0001-2026",
+      "notice_type": "cn-standard",
+      "pub_num": "0001-2026",
+      "title": "Market study for deep tech commercialisation",
+      "value": 50000.0,
+      "winner": ""
+    },
+    {
+      "bucket": "Live opportunity",
+      "buyer": "Enterprise Ireland",
+      "country": "IRL",
+      "cpv": "79411100",
+      "currency": "",
+      "deadline": "2099-12-31",
+      "description": "Support for university spinouts.",
+      "duration": "—",
+      "languages": "GLE",
+      "link": "https://ted.europa.eu/en/notice/-/detail/0005-2026",
+      "notice_type": "cn-standard",
+      "pub_num": "0005-2026",
+      "title": "Spin-off support programme",
+      "value": null,
+      "winner": ""
+    },
+    {
+      "bucket": "Live opportunity",
+      "buyer": "Innovation Fund",
+      "country": "NLD",
+      "cpv": "79410000",
+      "currency": "",
+      "deadline": "—",
+      "description": "Investor readiness coaching.",
+      "duration": "—",
+      "languages": "ENG",
+      "link": "https://ted.europa.eu/en/notice/-/detail/0006-2026",
+      "notice_type": "cn-standard",
+      "pub_num": "0006-2026",
+      "title": "Investment readiness programme",
+      "value": null,
+      "winner": ""
+    },
+    {
+      "bucket": "Live opportunity",
+      "buyer": "Agence FR",
+      "country": "FRA",
+      "cpv": "79410000",
+      "currency": "",
+      "deadline": "2099-12-31",
+      "description": "Description francaise du marche.",
+      "duration": "—",
+      "languages": "ENG",
+      "link": "https://ted.europa.eu/en/notice/-/detail/0007-2026",
+      "notice_type": "cn-standard",
+      "pub_num": "0007-2026",
+      "title": "Conseil strategique",
+      "value": null,
+      "winner": ""
+    }
+  ]
+}

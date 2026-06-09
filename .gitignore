@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Scraper state (regenerated each run)
+output/seen_tenders.json
+
+# OS / editor
+.DS_Store
+*.swp
