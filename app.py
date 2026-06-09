@@ -1,8 +1,9 @@
 import re
-import streamlit as st
-import pandas as pd
 from datetime import datetime
 from pathlib import Path
+
+import pandas as pd
+import streamlit as st
 
 st.set_page_config(page_title="DevelopMinded Intelligence", page_icon="🔍", layout="wide")
 st.logo("logo.png", size="large")

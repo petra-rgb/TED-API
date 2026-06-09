@@ -226,6 +226,24 @@ def _extract_submission_deadline(text: str) -> str:
     return ""
 
 
+def _main_content(soup):
+    """The most relevant content container of a page, falling back to <body>."""
+    return (soup.find("main") or soup.find("article")
+            or soup.find("div", id="content") or soup.find("body"))
+
+
+def _deadline_from_detail(url: str) -> str:
+    """Fetch a tender's detail page and pull the submission deadline from its text."""
+    soup = fetch(url)
+    if not soup:
+        return ""
+    main = _main_content(soup)
+    if not main:
+        return ""
+    text = main.get_text(" ", strip=True)
+    return _extract_submission_deadline(text) or find_deadline(main)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # SITE SCRAPERS
 # ─────────────────────────────────────────────────────────────────────────────
@@ -289,11 +307,11 @@ def scrape_eit_health(site: dict) -> list[dict]:
         title = a.get_text(strip=True)
         if not title or len(title) < 10:
             continue
-        if any(kw in title.lower() for kw in ["tender", "rfp", "call for", "procurement", "request for proposal"]):
-            if href not in seen:
-                seen.add(href)
-                url = abs_url(site["base_url"], href)
-                tenders.append(make_tender(source=site["name"], title=title, url=url))
+        kws = ["tender", "rfp", "call for", "procurement", "request for proposal"]
+        if any(kw in title.lower() for kw in kws) and href not in seen:
+            seen.add(href)
+            url = abs_url(site["base_url"], href)
+            tenders.append(make_tender(source=site["name"], title=title, url=url))
 
     # Always include the external portal pointer
     tenders.append(make_tender(
@@ -308,431 +326,371 @@ def scrape_eit_health(site: dict) -> list[dict]:
     return tenders
 
 
+def _card_deadline(card, desc_el) -> str:
+    """Deadline from a card's description paragraph, else any date inside the card."""
+    if desc_el:
+        dl = _extract_submission_deadline(desc_el.get_text(" ", strip=True))
+        if dl:
+            return dl
+    return find_deadline(card)
+
+
+def _climate_card(h4, site: dict, seen: set) -> dict | None:
+    title = h4.get_text(strip=True)
+    if not title or len(title) < 8:
+        return None
+    card = h4.find_parent("div")
+    if not card:
+        return None
+    a = card.find("a", href=True)
+    if not a:
+        return None
+    url = abs_url(site["base_url"], a["href"])
+    if url in seen:
+        return None
+    seen.add(url)
+    desc_el = card.find("p")
+    desc = desc_el.get_text(strip=True)[:200] if desc_el else ""
+    return make_tender(source=site["name"], title=title, url=url,
+                       deadline=_card_deadline(card, desc_el), description=desc)
+
+
+def _climate_fallback_headings(soup, site: dict, seen: set) -> list[dict]:
+    """Older layout: a heading followed by a link."""
+    main = soup.find("main") or soup.find("div", id="content") or soup.find("body")
+    if not main:
+        return []
+    out = []
+    for heading in main.find_all(["h2", "h3", "h4"]):
+        title = heading.get_text(strip=True)
+        if len(title) < 10:
+            continue
+        link = heading.find("a") or heading.find_next_sibling("a") or heading.find_next("a")
+        href = link.get("href") if link else None
+        if href and href not in seen:
+            seen.add(href)
+            out.append(make_tender(source=site["name"], title=title,
+                                   url=abs_url(site["base_url"], href)))
+    return out
+
+
+def _climate_fallback_docs(soup, site: dict, seen: set) -> list[dict]:
+    """Last resort: direct PDF/doc links or tender-keyword links."""
+    out = []
+    for a in soup.find_all("a", href=True):
+        href = a["href"]
+        title = a.get_text(strip=True)
+        if not title or len(title) < 10:
+            continue
+        is_doc = any(href.lower().endswith(ext) for ext in (".pdf", ".docx", ".doc"))
+        is_kw = any(kw in title.lower()
+                    for kw in ("rfp", "tender", "procurement", "call for", "request for"))
+        if (is_doc or is_kw) and href not in seen:
+            seen.add(href)
+            out.append(make_tender(source=site["name"], title=title,
+                                   url=abs_url(site["base_url"], href)))
+    return out
+
+
 def scrape_climate_kic(site: dict) -> list[dict]:
     """
     EIT Climate-KIC — /get-involved/procurement/
-    Page uses Tailwind card layout — each card is a <div> containing:
-      <h4>  title
-      <p>   description (often contains "deadline ... is DD Month [YYYY]")
-      <a>   "Read more" → PDF RFP document
-
-    Deadline is extracted from the <p> description text; no need to open the PDF.
+    Tailwind card layout: each card is a <div> with an <h4> title, a <p>
+    description (often "deadline ... is DD Month [YYYY]"), and a "Read more" <a>.
+    Falls back to heading→link and direct document links on older layouts.
     """
-    tenders = []
     soup = fetch(site["url"])
     if not soup:
-        return tenders
-
+        return []
     seen: set[str] = set()
-
-    # Primary: find cards via <h4> headings — each is a tender card
-    for h4 in soup.find_all("h4"):
-        title = h4.get_text(strip=True)
-        if not title or len(title) < 8:
-            continue
-
-        card = h4.find_parent("div")
-        if not card:
-            continue
-
-        a = card.find("a", href=True)
-        if not a:
-            continue
-        href = a["href"]
-        url = abs_url(site["base_url"], href)
-        if url in seen:
-            continue
-
-        # Deadline from description paragraph
-        deadline = ""
-        desc_el = card.find("p")
-        if desc_el:
-            desc_text = desc_el.get_text(" ", strip=True)
-            deadline = _extract_submission_deadline(desc_text)
-            if not deadline:
-                deadline = find_deadline(card)
-        else:
-            deadline = find_deadline(card)
-
-        seen.add(url)
-        desc = desc_el.get_text(strip=True)[:200] if desc_el else ""
-        tenders.append(make_tender(
-            source=site["name"], title=title, url=url,
-            deadline=deadline, description=desc,
-        ))
-
-    # Fallback A: headings followed by links (older page layouts)
+    tenders = [t for t in (_climate_card(h4, site, seen) for h4 in soup.find_all("h4")) if t]
     if not tenders:
-        main = soup.find("main") or soup.find("div", id="content") or soup.find("body")
-        if main:
-            for heading in main.find_all(["h2", "h3", "h4"]):
-                title = heading.get_text(strip=True)
-                if len(title) < 10:
-                    continue
-                link = (heading.find("a")
-                        or heading.find_next_sibling("a")
-                        or heading.find_next("a"))
-                if link and link.get("href"):
-                    href = link["href"]
-                    if href not in seen:
-                        seen.add(href)
-                        url = abs_url(site["base_url"], href)
-                        tenders.append(make_tender(source=site["name"], title=title, url=url))
-
-    # Fallback B: direct PDF / document links
+        tenders = _climate_fallback_headings(soup, site, seen)
     if not tenders:
-        for a in soup.find_all("a", href=True):
-            href = a["href"]
-            title = a.get_text(strip=True)
-            if not title or len(title) < 10:
-                continue
-            is_doc = any(href.lower().endswith(ext) for ext in [".pdf", ".docx", ".doc"])
-            is_tender_kw = any(kw in title.lower() for kw in [
-                "rfp", "tender", "procurement", "call for", "request for",
-            ])
-            if (is_doc or is_tender_kw) and href not in seen:
-                seen.add(href)
-                url = abs_url(site["base_url"], href)
-                tenders.append(make_tender(source=site["name"], title=title, url=url))
-
+        tenders = _climate_fallback_docs(soup, site, seen)
     return tenders
+
+
+_FOOD_CARD_KW = ["card", "post", "call", "procurement", "item", "tender", "entry"]
+_FOOD_LINK_KW = ["rfp", "tender", "call", "procurement", "specialist", "partner", "services"]
+_FOOD_NAV = {"procurements archive", "open calls", "past calls", "subscribe", "newsletter"}
+
+
+def _food_containers(soup):
+    containers = soup.find_all("article")
+    if containers:
+        return containers
+    return soup.find_all("div", class_=lambda c: c and any(
+        kw in (c if isinstance(c, str) else " ".join(c)) for kw in _FOOD_CARD_KW))
+
+
+def _food_from_container(container, site: dict, seen: set) -> dict | None:
+    heading = container.find(["h2", "h3", "h4"])
+    link = container.find("a", href=True)
+    if not heading or not link:
+        return None
+    title = heading.get_text(strip=True)
+    href = link["href"]
+    if not title or len(title) < 5 or href in seen:
+        return None
+    seen.add(href)
+    desc_el = container.find("p")
+    desc = desc_el.get_text(strip=True)[:200] if desc_el else ""
+    return make_tender(source=site["name"], title=title, url=abs_url(site["base_url"], href),
+                       deadline=find_deadline(container), description=desc)
+
+
+def _food_fallback_links(soup, site: dict, seen: set) -> list[dict]:
+    out = []
+    for a in soup.find_all("a", href=True):
+        href = a["href"]
+        title = a.get_text(strip=True)
+        if not title or len(title) < 10:
+            continue
+        if any(kw in title.lower() for kw in _FOOD_LINK_KW) and href not in seen:
+            seen.add(href)
+            out.append(make_tender(source=site["name"], title=title,
+                                   url=abs_url(site["base_url"], href)))
+    return out
 
 
 def scrape_eit_food(site: dict) -> list[dict]:
     """
     EIT Food — /open-procurements-overview
-    Card/article layout. Subscribe URL: /open-calls-subscribe
+    Card/article layout, with a keyword-link fallback. Navigation entries and
+    closed tenders are dropped.
     """
-    tenders = []
     soup = fetch(site["url"])
     if not soup:
-        return tenders
-
+        return []
     seen = set()
+    tenders = [t for t in (_food_from_container(c, site, seen) for c in _food_containers(soup)) if t]
+    if not tenders:
+        tenders = _food_fallback_links(soup, site, seen)
+    return [t for t in tenders
+            if t["title"].lower() not in _FOOD_NAV and "closed" not in t["deadline"].lower()]
 
-    # Card containers
-    containers = soup.find_all("article")
-    if not containers:
-        containers = soup.find_all("div", class_=lambda c: c and any(
-            kw in (c if isinstance(c, str) else " ".join(c))
-            for kw in ["card", "post", "call", "procurement", "item", "tender", "entry"]
-        ))
 
-    for container in containers:
-        heading = container.find(["h2", "h3", "h4"])
-        link = container.find("a", href=True)
-        if not heading or not link:
+_UM_SKIP = {"view more", "read more", "learn more", "apply", "download", "click here", "open"}
+_RM_PATHS = ["/articles/", "/call-for-offers/", "/tender", "/procurement/rfp"]
+
+
+def _um_title(a, parent, href: str) -> str:
+    """Resolve a UM RFP title: card heading → link text → slug."""
+    title = ""
+    if parent:
+        h = parent.find(["h2", "h3", "h4"])
+        if h:
+            title = h.get_text(strip=True)
+    if not title or title.lower() in _UM_SKIP:
+        link_text = a.get_text(strip=True)
+        if link_text and link_text.lower() not in _UM_SKIP and len(link_text) > 5:
+            title = link_text
+    if not title or title.lower() in _UM_SKIP:
+        title = href.rstrip("/").split("/")[-1].replace("-", " ").title()
+    return title
+
+
+def _um_links(soup, site: dict, seen: set) -> list[tuple[str, str]]:
+    links = []
+    for a in soup.find_all("a", href=True):
+        href = a["href"]
+        if "/request-for-proposal/" not in href or href in seen:
             continue
-
-        title = heading.get_text(strip=True)
-        href = link["href"]
-        if not title or len(title) < 5 or href in seen:
+        parent = a.find_parent(["article", "div", "li", "section"])
+        if parent:
+            ptext = parent.get_text(" ", strip=True).lower()
+            if "closed" in ptext and "open request" not in ptext:
+                continue
+        title = _um_title(a, parent, href)
+        if not title:
             continue
         seen.add(href)
-
-        url = abs_url(site["base_url"], href)
-        deadline = find_deadline(container)
-        desc_el = container.find("p")
-        desc = desc_el.get_text(strip=True)[:200] if desc_el else ""
-        tenders.append(make_tender(source=site["name"], title=title, url=url, deadline=deadline, description=desc))
-
-    # Fallback: keyword links
-    if not tenders:
-        for a in soup.find_all("a", href=True):
-            href = a["href"]
-            title = a.get_text(strip=True)
-            if not title or len(title) < 10:
-                continue
-            if any(kw in title.lower() for kw in [
-                "rfp", "tender", "call", "procurement", "specialist", "partner", "services",
-            ]) and href not in seen:
-                seen.add(href)
-                url = abs_url(site["base_url"], href)
-                tenders.append(make_tender(source=site["name"], title=title, url=url))
-
-    # Remove obvious navigation items and closed tenders
-    NAV_TITLES = {"procurements archive", "open calls", "past calls", "subscribe", "newsletter"}
-    tenders = [
-        t for t in tenders
-        if t["title"].lower() not in NAV_TITLES
-        and "closed" not in t["deadline"].lower()
-    ]
-
-    return tenders
+        links.append((title, abs_url(site["base_url"], href)))
+    return links
 
 
 def scrape_eit_urban_mobility(site: dict) -> list[dict]:
     """
     EIT Urban Mobility — /join-us/request-for-proposals/
-    Items have 'Open request' or 'Closed request' status; we keep only open ones.
-    Each links to /request-for-proposal/<slug>/.
-
-    Deadlines are NOT on the listing page — they live on each individual RFP page
-    in a box: "Deadline for submission: 20 May 2026" (or "Deadline for submissions:
-    DD Month YYYY at HH:MM CET"). We fetch each page and use _extract_submission_deadline.
+    Keeps only 'Open request' items; deadlines live on each RFP detail page
+    ("Deadline for submission: ..."), so each link is followed.
     """
-    tenders = []
     soup = fetch(site["url"])
     if not soup:
-        return tenders
-
+        return []
     seen: set[str] = set()
-    links: list[tuple[str, str]] = []   # (title, url)
-    SKIP_LABELS = {"view more", "read more", "learn more", "apply", "download", "click here", "open"}
+    return [make_tender(source=site["name"], title=title, url=url,
+                        deadline=_deadline_from_detail(url))
+            for title, url in _um_links(soup, site, seen)]
 
-    for a in soup.find_all("a", href=True):
-        href = a["href"]
-        if "/request-for-proposal/" not in href:
-            continue
-        if href in seen:
-            continue
 
-        parent = a.find_parent(["article", "div", "li", "section"])
-        if parent:
-            parent_text = parent.get_text(" ", strip=True).lower()
-            if "closed" in parent_text and "open request" not in parent_text:
-                continue
-
-        # Title from heading inside the card
-        title = ""
+def _rm_title(a) -> str:
+    title = a.get_text(strip=True)
+    if not title or len(title) < 8:
+        parent = a.find_parent(["article", "div", "li"])
         if parent:
             h = parent.find(["h2", "h3", "h4"])
             if h:
                 title = h.get_text(strip=True)
-        if not title or title.lower() in SKIP_LABELS:
-            link_text = a.get_text(strip=True)
-            if link_text and link_text.lower() not in SKIP_LABELS and len(link_text) > 5:
-                title = link_text
-        if not title or title.lower() in SKIP_LABELS:
-            slug = href.rstrip("/").split("/")[-1]
-            title = slug.replace("-", " ").title()
-        if not title:
-            continue
+    return title
 
+
+def _rm_links(soup, site: dict, seen: set) -> list[tuple[str, str]]:
+    links = []
+    for a in soup.find_all("a", href=True):
+        href = a["href"]
+        if not any(path in href for path in _RM_PATHS) or href in seen:
+            continue
+        title = _rm_title(a)
+        if not title or len(title) < 5:
+            continue
         seen.add(href)
         links.append((title, abs_url(site["base_url"], href)))
-
-    for title, url in links:
-        deadline = ""
-        detail_soup = fetch(url)
-        if detail_soup:
-            main = (
-                detail_soup.find("main")
-                or detail_soup.find("article")
-                or detail_soup.find("div", id="content")
-                or detail_soup.find("body")
-            )
-            if main:
-                text = main.get_text(" ", strip=True)
-                deadline = _extract_submission_deadline(text)
-                if not deadline:
-                    deadline = find_deadline(main)
-        tenders.append(make_tender(source=site["name"], title=title, url=url, deadline=deadline))
-
-    return tenders
+    return links
 
 
 def scrape_eit_raw_materials(site: dict) -> list[dict]:
     """
     EIT RawMaterials — /about-us/procurement
-    Article-style listing; tender links use /articles/ or /call-for-offers/ paths.
-
-    The listing page only shows publication dates (not submission deadlines), so
-    we follow each individual tender link and extract the true submission deadline
-    from the page content — looking for "Deadline for submitting proposals" lines.
+    Article/call-for-offers links; submission deadline is read from each detail page.
     """
-    tenders = []
     soup = fetch(site["url"])
     if not soup:
-        return tenders
+        return []
+    seen: set[str] = set()
+    return [make_tender(source=site["name"], title=title, url=url,
+                        deadline=_deadline_from_detail(url))
+            for title, url in _rm_links(soup, site, seen)]
 
-    seen = set()
-    links: list[tuple[str, str]] = []   # (title, url)
 
-    for a in soup.find_all("a", href=True):
-        href = a["href"]
-        if not any(path in href for path in ["/articles/", "/call-for-offers/", "/tender", "/procurement/rfp"]):
-            continue
-        if href in seen:
-            continue
+_INNO_ITEM_CLASS = "innoenergy-blocks__simple-accordion__item"
 
-        title = a.get_text(strip=True)
-        if not title or len(title) < 8:
-            parent = a.find_parent(["article", "div", "li"])
-            if parent:
-                h = parent.find(["h2", "h3", "h4"])
-                if h:
-                    title = h.get_text(strip=True)
 
-        if not title or len(title) < 5:
-            continue
+def _innoenergy_content(page_text: str) -> str:
+    """Pull page.content HTML out of the Next.js __NEXT_DATA__ blob."""
+    m = re.search(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', page_text, re.DOTALL)
+    if not m:
+        print("  [ERROR] InnoEnergy: __NEXT_DATA__ not found", file=sys.stderr)
+        return ""
+    try:
+        data = json.loads(m.group(1))
+        return (data.get("props", {}).get("pageProps", {})
+                .get("__TEMPLATE_QUERY_DATA__", {}).get("page", {}).get("content", ""))
+    except (json.JSONDecodeError, AttributeError):
+        print("  [ERROR] InnoEnergy: failed to parse __NEXT_DATA__", file=sys.stderr)
+        return ""
 
-        seen.add(href)
-        links.append((title, abs_url(site["base_url"], href)))
 
-    for title, url in links:
-        deadline = ""
-        detail_soup = fetch(url)
-        if detail_soup:
-            main = (
-                detail_soup.find("main")
-                or detail_soup.find("article")
-                or detail_soup.find("div", id="content")
-                or detail_soup.find("body")
-            )
-            if main:
-                text = main.get_text(" ", strip=True)
-                deadline = _extract_submission_deadline(text)
-                if not deadline:
-                    deadline = find_deadline(main)
+def _innoenergy_deadline(item) -> str:
+    desc = item.find("div", class_=f"{_INNO_ITEM_CLASS}-desc")
+    if desc:
+        for p in desc.find_all("p"):
+            text = p.get_text(" ", strip=True)
+            if "deadline for submission" in text.lower():
+                return text.split(":", 1)[-1].strip()
+    return ""
 
-        tenders.append(make_tender(source=site["name"], title=title, url=url, deadline=deadline))
 
-    return tenders
+def _innoenergy_url(item, site: dict) -> str:
+    link_p = item.find("p", class_=f"{_INNO_ITEM_CLASS}-link")
+    if link_p:
+        a = link_p.find("a", href=True)
+        if a:
+            return abs_url(site["base_url"], a["href"])
+    return site["url"]
+
+
+def _innoenergy_item(item, site: dict, seen: set) -> dict | None:
+    span = item.find("span", class_=f"{_INNO_ITEM_CLASS}-text")
+    if not span:
+        return None
+    raw_title = span.get_text(strip=True)         # "DD.MM.YYYY | Title"
+    parts = raw_title.split("|", 1)
+    title = parts[1].strip() if len(parts) > 1 else raw_title
+    if not title or len(title) < 5 or title in seen:
+        return None
+    seen.add(title)
+    return make_tender(source=site["name"], title=title,
+                       url=_innoenergy_url(item, site), deadline=_innoenergy_deadline(item))
 
 
 def scrape_innoenergy(site: dict) -> list[dict]:
     """
     EIT InnoEnergy — /about-us/join-us/request-for-proposal/
-    Next.js app: tender data is embedded in <script id="__NEXT_DATA__"> as HTML
-    inside page.content. Each accordion item has class
-    'innoenergy-blocks__simple-accordion__item' with:
-      - span.innoenergy-blocks__simple-accordion__item-text  → "DD.MM.YYYY | Title"
-      - strong "Deadline for submission proposals:" paragraph → deadline
-      - p.innoenergy-blocks__simple-accordion__item-link a   → download URL
+    Next.js app: tender data is embedded in <script id="__NEXT_DATA__"> as HTML,
+    one accordion item per tender.
     """
-    tenders = []
     try:
         resp = requests.get(site["url"], headers=HEADERS, timeout=REQUEST_TIMEOUT)
         resp.raise_for_status()
     except requests.RequestException as e:
         print(f"  [ERROR] Could not fetch {site['url']}: {e}", file=sys.stderr)
-        return tenders
-
-    # Pull the embedded Next.js JSON
-    m = re.search(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', resp.text, re.DOTALL)
-    if not m:
-        print("  [ERROR] InnoEnergy: __NEXT_DATA__ not found", file=sys.stderr)
-        return tenders
-
-    try:
-        data = json.loads(m.group(1))
-        content_html = (
-            data.get("props", {})
-                .get("pageProps", {})
-                .get("__TEMPLATE_QUERY_DATA__", {})
-                .get("page", {})
-                .get("content", "")
-        )
-    except (json.JSONDecodeError, AttributeError):
-        print("  [ERROR] InnoEnergy: failed to parse __NEXT_DATA__", file=sys.stderr)
-        return tenders
-
+        return []
+    content_html = _innoenergy_content(resp.text)
     if not content_html:
-        return tenders
-
+        return []
     soup = BeautifulSoup(content_html, "lxml")
-    seen = set()
+    seen: set[str] = set()
+    return [t for t in (_innoenergy_item(item, site, seen)
+                        for item in soup.find_all("div", class_=_INNO_ITEM_CLASS)) if t]
 
-    for item in soup.find_all("div", class_="innoenergy-blocks__simple-accordion__item"):
-        # Title span: "04.05.2026 | Catering services for The Business Booster 2026"
-        span = item.find("span", class_="innoenergy-blocks__simple-accordion__item-text")
-        if not span:
-            continue
-        raw_title = span.get_text(strip=True)
-        parts = raw_title.split("|", 1)
-        title = parts[1].strip() if len(parts) > 1 else raw_title
-        if not title or len(title) < 5 or title in seen:
-            continue
-        seen.add(title)
 
-        # Deadline: look for "Deadline for submission proposals:" in the desc block
-        deadline = ""
-        desc = item.find("div", class_="innoenergy-blocks__simple-accordion__item-desc")
-        if desc:
-            for p in desc.find_all("p"):
-                text = p.get_text(" ", strip=True)
-                if "deadline for submission" in text.lower():
-                    deadline = text.split(":", 1)[-1].strip()
-                    break
+def _culture_title(a, title_div, slug: str) -> str:
+    title = a.get_text(strip=True)
+    if not title or len(title) < 8:
+        h = title_div.find(["h2", "h3", "h4"])
+        if h:
+            title = h.get_text(strip=True)
+    if not title or len(title) < 8:
+        title = slug.replace("-", " ").title()
+    return title
 
-        # Download URL: last <a> in the item-link paragraph
-        url = site["url"]
-        link_p = item.find("p", class_="innoenergy-blocks__simple-accordion__item-link")
-        if link_p:
-            a = link_p.find("a", href=True)
-            if a:
-                url = abs_url(site["base_url"], a["href"])
 
-        tenders.append(make_tender(
-            source=site["name"], title=title, url=url, deadline=deadline,
-        ))
+def _culture_deadline(card) -> str:
+    """End-date from a 'StartDate › EndDate' cell (the closing date)."""
+    date_div = card.find("div", class_="date")
+    if not date_div:
+        return ""
+    date_text = date_div.get_text(" ", strip=True)
+    if "›" in date_text:
+        return date_text.split("›", 1)[1].strip()
+    return date_text.strip()
 
-    return tenders
+
+def _culture_card(card, site: dict, seen: set) -> dict | None:
+    title_div = card.find("div", class_="content-title")
+    if not title_div:
+        return None
+    a = title_div.find("a", href=True)
+    if not a:
+        return None
+    href = a["href"]
+    if "/your-opportunities/request-proposals/" not in href:
+        return None
+    slug = href.rstrip("/").split("/")[-1]
+    if slug in ("request-proposals", "archive") or not slug:
+        return None
+    url = abs_url(site["base_url"], href)
+    if url in seen:
+        return None
+    seen.add(url)
+    return make_tender(source=site["name"], title=_culture_title(a, title_div, slug),
+                       url=url, deadline=_culture_deadline(card))
 
 
 def scrape_eit_culture_creativity(site: dict) -> list[dict]:
     """
     EIT Culture & Creativity — /your-opportunities/request-proposals
-
-    Each tender card is a <div class="content"> containing:
-      • <div class="content-title"><h2><a href="/your-opportunities/request-proposals/<slug>">
-      • <div class="date"><div>April 13, 2026  ›  May 13, 2026</div></div>
-
-    The date after ›  is the submission deadline. Both dates are on the listing
-    page itself, so no individual-page fetches needed.
+    Each <div class="content"> card carries the title link and a
+    "StartDate › EndDate" date cell; the end-date is the submission deadline.
     """
-    tenders = []
     soup = fetch(site["url"])
     if not soup:
-        return tenders
-
+        return []
     seen: set[str] = set()
-
-    for card in soup.find_all("div", class_="content"):
-        # ── Title + URL ──────────────────────────────────────────────────────
-        title_div = card.find("div", class_="content-title")
-        if not title_div:
-            continue
-        a = title_div.find("a", href=True)
-        if not a:
-            continue
-        href = a["href"]
-        if "/your-opportunities/request-proposals/" not in href:
-            continue
-        slug = href.rstrip("/").split("/")[-1]
-        if slug in ("request-proposals", "archive") or not slug:
-            continue
-
-        url = abs_url(site["base_url"], href)
-        if url in seen:
-            continue
-        seen.add(url)
-
-        title = a.get_text(strip=True)
-        if not title or len(title) < 8:
-            h = title_div.find(["h2", "h3", "h4"])
-            if h:
-                title = h.get_text(strip=True)
-        if not title or len(title) < 8:
-            title = slug.replace("-", " ").title()
-
-        # ── Deadline: extract end-date from "StartDate › EndDate" ────────────
-        deadline = ""
-        date_div = card.find("div", class_="date")
-        if date_div:
-            date_text = date_div.get_text(" ", strip=True)
-            if "›" in date_text:
-                # Take the part after the arrow — that is the closing date
-                deadline = date_text.split("›", 1)[1].strip()
-            else:
-                deadline = date_text.strip()
-
-        tenders.append(make_tender(
-            source=site["name"], title=title, url=url, deadline=deadline,
-        ))
-
-    return tenders
+    return [t for t in (_culture_card(c, site, seen)
+                        for c in soup.find_all("div", class_="content")) if t]
 
 
 def scrape_eit_water(site: dict) -> list[dict]:

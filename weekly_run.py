@@ -15,7 +15,6 @@ From command line:
 """
 
 import calendar
-import importlib
 import os
 import re
 from datetime import UTC, datetime
@@ -26,9 +25,6 @@ import pandas as pd
 
 import evaluate
 import scraper
-
-importlib.reload(scraper)
-importlib.reload(evaluate)
 
 # ── File paths ────────────────────────────────────────────────────────────────
 OUTPUT          = Path("output")
@@ -110,6 +106,101 @@ def _seed_if_needed():
             print("  ↳ No existing evaluated CSV found — will evaluate all on first run")
 
 
+# ── Pipeline stages ─────────────────────────────────────────────────────────────
+_PLACEHOLDER_COLS = ["id", "source", "title", "url", "deadline", "fit",
+                     "score", "fit_reason", "fit_match", "call_summary", "call_deadline"]
+
+
+def _find_new(all_raw: list[dict], verbose: bool) -> list[dict]:
+    """Tenders whose id is not already in the master raw CSV."""
+    known_ids: set[str] = set()
+    if MASTER_RAW_CSV.exists():
+        known_ids = set(pd.read_csv(MASTER_RAW_CSV)["id"].astype(str))
+    new_raw = [t for t in all_raw if t["id"] not in known_ids]
+    if verbose:
+        print(f"     {len(new_raw)} new tender(s) not seen before")
+    return new_raw
+
+
+def _evaluate_new(new_raw: list[dict], api_key: str | None, verbose: bool) -> list[dict]:
+    if not new_raw:
+        if verbose:
+            print("3/4  No new tenders — skipping Claude evaluation")
+        return []
+    if verbose:
+        print(f"3/4  Evaluating {len(new_raw)} new tender(s) with Claude …")
+    key = api_key or os.environ.get("ANTHROPIC_API_KEY")
+    if not key:
+        raise ValueError("Set ANTHROPIC_API_KEY or pass api_key= to weekly_run.run()")
+    return evaluate.evaluate_all(new_raw, api_key=key, verbose=verbose)
+
+
+def _append_master_raw(new_raw: list[dict], verbose: bool) -> None:
+    if not new_raw:
+        return
+    df_raw = pd.read_csv(MASTER_RAW_CSV) if MASTER_RAW_CSV.exists() else pd.DataFrame()
+    df_raw = pd.concat([df_raw, pd.DataFrame(new_raw)], ignore_index=True)
+    df_raw.to_csv(MASTER_RAW_CSV, index=False)
+    if verbose:
+        print(f"     Master raw updated: {len(df_raw)} total tenders")
+
+
+def _append_master_eval(new_evaluated: list[dict], verbose: bool) -> pd.DataFrame:
+    df_eval = pd.read_csv(MASTER_EVAL_CSV) if MASTER_EVAL_CSV.exists() else pd.DataFrame()
+    if new_evaluated:
+        df_eval = pd.concat([df_eval, pd.DataFrame(new_evaluated)], ignore_index=True)
+        df_eval.to_csv(MASTER_EVAL_CSV, index=False)
+        if verbose:
+            print(f"     Master eval updated: {len(df_eval)} total evaluated")
+    return df_eval
+
+
+def _rebuild_active(df_eval: pd.DataFrame, verbose: bool) -> None:
+    if df_eval.empty:
+        return
+    active = [r for r in df_eval.to_dict("records") if not _is_expired(r)]
+    pd.DataFrame(active).to_csv(ACTIVE_CSV, index=False)
+    if verbose:
+        print(f"     Active tenders (Streamlit): {len(active)}")
+
+
+def _write_new_week(new_evaluated: list[dict]) -> None:
+    active_new = [r for r in new_evaluated if not _is_expired(r)] if new_evaluated else []
+    if active_new:
+        pd.DataFrame(active_new).to_csv(NEW_WEEK_CSV, index=False)
+    else:
+        # No new active tenders — write a header-only file so the Streamlit page loads.
+        pd.DataFrame(columns=_PLACEHOLDER_COLS).to_csv(NEW_WEEK_CSV, index=False)
+
+
+def _notify(new_evaluated: list[dict], run_time: str, verbose: bool) -> None:
+    slack_url = os.environ.get("SLACK_WEBHOOK_URL", "")
+    relevant = [r for r in new_evaluated
+                if r.get("fit") in ("YES", "MAYBE") and not _is_expired(r)]
+    if relevant:
+        notify_slack(slack_url, relevant, run_time[:10])
+        if verbose:
+            print(f"     Slack notification sent: {len(relevant)} relevant tender(s)")
+    elif verbose and slack_url:
+        print("     Slack: no new active relevant tenders this week — notification skipped")
+
+
+def _safe_len(path) -> int:
+    try:
+        return len(pd.read_csv(path))
+    except Exception:
+        return 0
+
+
+def _print_summary(run_time: str, new_raw: list[dict]) -> None:
+    print()
+    print(f"✅  Done — {run_time}")
+    print(f"    New tenders found       : {len(new_raw)}")
+    print(f"    New active this week    : {_safe_len(NEW_WEEK_CSV)}")
+    print(f"    Total active (Streamlit): {_safe_len(ACTIVE_CSV)}")
+    print(f"    Master raw total        : {_safe_len(MASTER_RAW_CSV)}")
+
+
 # ── Main weekly runner ────────────────────────────────────────────────────────
 def run(api_key: str | None = None, verbose: bool = True) -> list[dict]:
     """
@@ -118,110 +209,29 @@ def run(api_key: str | None = None, verbose: bool = True) -> list[dict]:
     """
     _seed_if_needed()
     run_time = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
-
-    # ── 1. Scrape all sites ───────────────────────────────────────────────────
     if verbose:
         print("─" * 55)
         print(f"EIT Weekly Run  —  {run_time}")
         print("─" * 55)
         print("1/4  Scraping all EIT KIC sites …")
+
     all_raw = scraper.run_all()
     if verbose:
         print(f"     {len(all_raw)} tenders found across all sites")
-
-    # ── 2. Find tenders not in master list ────────────────────────────────────
-    if verbose:
         print("2/4  Checking against master list …")
-    known_ids: set[str] = set()
-    if MASTER_RAW_CSV.exists():
-        known_ids = set(pd.read_csv(MASTER_RAW_CSV)["id"].astype(str))
-    new_raw = [t for t in all_raw if t["id"] not in known_ids]
-    if verbose:
-        print(f"     {len(new_raw)} new tender(s) not seen before")
+    new_raw = _find_new(all_raw, verbose)
+    new_evaluated = _evaluate_new(new_raw, api_key, verbose)
 
-    # ── 3. Evaluate only new tenders with Claude ──────────────────────────────
-    new_evaluated: list[dict] = []
-    if new_raw:
-        if verbose:
-            print(f"3/4  Evaluating {len(new_raw)} new tender(s) with Claude …")
-        key = api_key or os.environ.get("ANTHROPIC_API_KEY")
-        if not key:
-            raise ValueError("Set ANTHROPIC_API_KEY or pass api_key= to weekly_run.run()")
-        new_evaluated = evaluate.evaluate_all(new_raw, api_key=key, verbose=verbose)
-    else:
-        if verbose:
-            print("3/4  No new tenders — skipping Claude evaluation")
-
-    # ── 4. Update master CSVs and rebuild Streamlit views ────────────────────
     if verbose:
         print("4/4  Updating master files and Streamlit views …")
+    _append_master_raw(new_raw, verbose)
+    df_eval = _append_master_eval(new_evaluated, verbose)
+    _rebuild_active(df_eval, verbose)
+    _write_new_week(new_evaluated)
+    _notify(new_evaluated, run_time, verbose)
 
-    # Append new raw tenders to master raw
-    if new_raw:
-        df_raw = pd.read_csv(MASTER_RAW_CSV) if MASTER_RAW_CSV.exists() else pd.DataFrame()
-        df_raw = pd.concat([df_raw, pd.DataFrame(new_raw)], ignore_index=True)
-        df_raw.to_csv(MASTER_RAW_CSV, index=False)
-        if verbose:
-            print(f"     Master raw updated: {len(df_raw)} total tenders")
-
-    # Append new evaluated tenders to master eval
-    df_eval = pd.read_csv(MASTER_EVAL_CSV) if MASTER_EVAL_CSV.exists() else pd.DataFrame()
-    if new_evaluated:
-        df_eval = pd.concat([df_eval, pd.DataFrame(new_evaluated)], ignore_index=True)
-        df_eval.to_csv(MASTER_EVAL_CSV, index=False)
-        if verbose:
-            print(f"     Master eval updated: {len(df_eval)} total evaluated")
-
-    # Rebuild active_tenders.csv — all evaluated tenders that aren't expired
-    if not df_eval.empty:
-        records = df_eval.to_dict("records")
-        active  = [r for r in records if not _is_expired(r)]
-        pd.DataFrame(active).to_csv(ACTIVE_CSV, index=False)
-        if verbose:
-            print(f"     Active tenders (Streamlit): {len(active)}")
-
-    # Save new_this_week.csv — new evaluated tenders that aren't expired
-    _placeholder_cols = ["id", "source", "title", "url", "deadline", "fit",
-                         "score", "fit_reason", "fit_match", "call_summary", "call_deadline"]
-    if new_evaluated:
-        active_new = [r for r in new_evaluated if not _is_expired(r)]
-        if active_new:
-            pd.DataFrame(active_new).to_csv(NEW_WEEK_CSV, index=False)
-        else:
-            # All new tenders were expired — write header-only file
-            pd.DataFrame(columns=_placeholder_cols).to_csv(NEW_WEEK_CSV, index=False)
-    else:
-        pd.DataFrame(columns=_placeholder_cols).to_csv(NEW_WEEK_CSV, index=False)
-
-    # ── Slack notification ────────────────────────────────────────────────────
-    slack_url = os.environ.get("SLACK_WEBHOOK_URL", "")
-    relevant_active = [
-        r for r in new_evaluated
-        if r.get("fit") in ("YES", "MAYBE") and not _is_expired(r)
-    ]
-    if relevant_active:
-        notify_slack(slack_url, relevant_active, run_time[:10])
-        if verbose:
-            print(f"     Slack notification sent: {len(relevant_active)} relevant tender(s)")
-    elif verbose and slack_url:
-        print("     Slack: no new active relevant tenders this week — notification skipped")
-
-    # ── Summary ───────────────────────────────────────────────────────────────
     if verbose:
-        def _safe_len(path):
-            try:
-                return len(pd.read_csv(path))
-            except Exception:
-                return 0
-        n_active     = _safe_len(ACTIVE_CSV)
-        n_new_active = _safe_len(NEW_WEEK_CSV)
-        print()
-        print(f"✅  Done — {run_time}")
-        print(f"    New tenders found       : {len(new_raw)}")
-        print(f"    New active this week    : {n_new_active}")
-        print(f"    Total active (Streamlit): {n_active}")
-        print(f"    Master raw total        : {_safe_len(MASTER_RAW_CSV)}")
-
+        _print_summary(run_time, new_raw)
     return new_evaluated
 
 

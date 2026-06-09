@@ -1,7 +1,9 @@
-import streamlit as st
-import pandas as pd
 from datetime import datetime
+
+import pandas as pd
+import streamlit as st
 from supabase import create_client
+
 st.set_page_config(page_title="Ted Tenders", layout="wide")
 st.logo("logo.png", size="large")
 
@@ -377,6 +379,28 @@ def show_table(view: pd.DataFrame, cols: list, tab_key: str):
             st.rerun()
 
 
+def _apply_review_edits(edited, pub_nums: list) -> bool:
+    """Sync the edited reviewed-table rows back into `reviews`/`notes`. Returns changed."""
+    changed = False
+    for i in range(min(len(edited), len(pub_nums))):
+        pn         = pub_nums[i]
+        keep       = edited["in_review"].iloc[i] if "in_review" in edited.columns else True
+        new_status = edited["status"].iloc[i] if "status" in edited.columns else reviews.get(pn, "Reviewed")
+        new_note   = edited["notes"].iloc[i] if "notes" in edited.columns else ""
+        if not keep and pn in reviews:
+            del reviews[pn]
+            notes.pop(pn, None)
+            changed = True
+        elif keep:
+            if reviews.get(pn) != new_status:
+                reviews[pn] = new_status
+                changed = True
+            if notes.get(pn, "") != (new_note or ""):
+                notes[pn] = new_note or ""
+                changed = True
+    return changed
+
+
 def show_reviewed_table(view: pd.DataFrame, tab_key: str):
     if view.empty:
         st.info("No reviewed notices yet.")
@@ -404,26 +428,7 @@ def show_reviewed_table(view: pd.DataFrame, tab_key: str):
     )
 
     pub_nums = view["pub_num"].astype(str).tolist()
-    changed  = False
-    for i in range(len(edited)):
-        if i >= len(pub_nums):
-            break
-        pn         = pub_nums[i]
-        keep       = edited["in_review"].iloc[i] if "in_review" in edited.columns else True
-        new_status = edited["status"].iloc[i] if "status" in edited.columns else reviews.get(pn, "Reviewed")
-        new_note   = edited["notes"].iloc[i] if "notes" in edited.columns else ""
-        if not keep and pn in reviews:
-            del reviews[pn]
-            notes.pop(pn, None)
-            changed = True
-        elif keep:
-            if reviews.get(pn) != new_status:
-                reviews[pn] = new_status
-                changed = True
-            if notes.get(pn, "") != (new_note or ""):
-                notes[pn] = new_note or ""
-                changed = True
-    if changed:
+    if _apply_review_edits(edited, pub_nums):
         save_reviews(_sb, reviews, notes)
         st.rerun()
 

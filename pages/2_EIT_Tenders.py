@@ -5,10 +5,11 @@ Data refreshed weekly by GitHub Actions (weekly_run.py).
 """
 
 import re
-import streamlit as st
-import pandas as pd
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
+
+import pandas as pd
+import streamlit as st
 
 st.set_page_config(page_title="EIT Tenders", layout="wide")
 st.logo("logo.png", size="large")
