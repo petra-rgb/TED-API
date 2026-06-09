@@ -4,11 +4,18 @@ Invite-code protected. Client enters their company profile,
 gets AI-filtered EU tenders on screen + CSV download.
 """
 
-import streamlit as st
-import pandas as pd
-import requests, time, json, re, os
-from datetime import datetime, timedelta, timezone
+import os
+import sys
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import UTC, datetime, timedelta
+
+import pandas as pd
+import requests
+import streamlit as st
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import ted_core
 
 st.set_page_config(page_title="TED Tender Search", layout="wide")
 
@@ -78,24 +85,15 @@ if not st.session_state.authenticated:
 
 
 # ─────────────────────────────────────────────────────────────
-# TED FETCH CONSTANTS
+# TED FETCH CONSTANTS  (shared logic lives in ted_core)
 # ─────────────────────────────────────────────────────────────
-SEARCH_URL   = "https://api.ted.europa.eu/v3/notices/search"
 CLAUDE_URL   = "https://api.anthropic.com/v1/messages"
 CLAUDE_MODEL = "claude-haiku-4-5"
-PAGE_SIZE    = 250
 MAX_PAGES    = 20        # cap pages to keep runtime reasonable
 AI_WORKERS   = 3
+INTEL_TYPES  = ted_core.INTEL_TYPES
 
-RESPONSE_FIELDS = [
-    "publication-number", "notice-title", "buyer-name", "buyer-country",
-    "notice-type", "classification-cpv", "description-lot",
-    "estimated-value-lot", "estimated-value-cur-lot",
-    "submission-language", "contract-duration-period-lot",
-    "deadline-receipt-tender-date-lot", "BT-131(d)-Lot",
-    "deadline-date-lot", "BT-13(t)-Part",
-]
-
+# Client portal casts a wider net than the daily DM runs.
 BROAD_SEARCH_TERMS = [
     "commercialisation", "valorisation", "market study", "market research",
     "exploitation of results", "startup", "deep tech", "horizon europe",
@@ -105,162 +103,28 @@ BROAD_SEARCH_TERMS = [
     "innovation support", "venture", "spinout",
 ]
 
-CPV_CODES = {
-    "73200000": "R&D consultancy",
-    "79410000": "Business & mgmt consultancy",
-    "79411100": "Business development consultancy",
-    "79419000": "Evaluation consultancy",
-}
-
-INTEL_TYPES = {"can-standard", "can-social", "can-desg", "can-tran", "can-modif"}
-
 
 # ─────────────────────────────────────────────────────────────
-# HELPERS
-# ─────────────────────────────────────────────────────────────
-def flat(v) -> str:
-    if not v: return ""
-    if isinstance(v, str): return v.strip()
-    if isinstance(v, list):
-        return " | ".join(p for p in [flat(i) for i in v] if p)
-    if isinstance(v, dict):
-        for k in ("eng", "ENG", "fra", "FRA", "nld", "NLD", "deu", "DEU"):
-            if k in v and v[k]: return flat(v[k])
-        for val in v.values():
-            s = flat(val)
-            if s: return s
-    return str(v).strip() if v else ""
-
-
-def parse_deadline(raw):
-    if not raw: return None
-    if isinstance(raw, list): raw = raw[0] if raw else None
-    if isinstance(raw, dict): raw = next(iter(raw.values()), None)
-    if not raw or not isinstance(raw, str): return None
-    for fmt in ("%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%S.%f%z",
-                "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d%z", "%Y-%m-%d"):
-        try:
-            s  = raw[:25]
-            dt = datetime.strptime(s, fmt)
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
-            return dt
-        except ValueError:
-            continue
-    return None
-
-
-def extract(raw: dict) -> dict:
-    pub   = flat(raw.get("publication-number")) or "—"
-    title = flat(raw.get("notice-title"))       or "—"
-    buyer = flat(raw.get("buyer-name"))         or "—"
-    ntype = flat(raw.get("notice-type"))        or "—"
-    dl_dt = (
-        parse_deadline(raw.get("deadline-receipt-tender-date-lot"))
-        or parse_deadline(raw.get("BT-131(d)-Lot"))
-        or parse_deadline(raw.get("deadline-date-lot"))
-        or parse_deadline(raw.get("BT-13(t)-Part"))
-    )
-    cpv_raw  = raw.get("classification-cpv") or []
-    cpv_list = list(dict.fromkeys(cpv_raw)) if isinstance(cpv_raw, list) else ([cpv_raw] if cpv_raw else [])
-    val_raw  = raw.get("estimated-value-lot")
-    value    = float(val_raw[0]) if isinstance(val_raw, list) and val_raw else None
-    cur_raw  = raw.get("estimated-value-cur-lot")
-    currency = cur_raw[0] if isinstance(cur_raw, list) and cur_raw else ""
-    lang_raw = raw.get("submission-language") or []
-    languages = ", ".join(lang_raw) if isinstance(lang_raw, list) else str(lang_raw)
-    dur_raw  = raw.get("contract-duration-period-lot")
-    duration = "—"
-    if isinstance(dur_raw, list) and dur_raw:
-        d = dur_raw[0]
-        if isinstance(d, dict):
-            duration = f"{d.get('value','?')} {d.get('unit','').lower()}"
-    cty_raw = raw.get("buyer-country") or []
-    country = cty_raw[0] if isinstance(cty_raw, list) and cty_raw else ""
-    desc_raw = raw.get("description-lot") or {}
-    if isinstance(desc_raw, dict):
-        description = (desc_raw.get("eng") or desc_raw.get("ENG")
-                       or next(iter(desc_raw.values()), None))
-        if isinstance(description, list): description = " ".join(description)
-    elif isinstance(desc_raw, list):
-        description = " ".join(str(x) for x in desc_raw)
-    else:
-        description = str(desc_raw) if desc_raw else ""
-    description = (description or "")[:2000]
-    return {
-        "pub_num":     pub,
-        "title":       title,
-        "buyer":       buyer,
-        "notice_type": ntype,
-        "cpv":         ", ".join(cpv_list[:4]),
-        "deadline":    dl_dt.strftime("%Y-%m-%d") if dl_dt else "—",
-        "deadline_dt": dl_dt,
-        "link":        f"https://ted.europa.eu/en/notice/-/detail/{pub}" if pub != "—" else "",
-        "value":       value,
-        "currency":    currency,
-        "languages":   languages,
-        "duration":    duration,
-        "country":     country,
-        "description": description,
-    }
-
-
-# ─────────────────────────────────────────────────────────────
-# FETCH
+# FETCH  (uses ted_core; no negative filter, no live/intel split)
 # ─────────────────────────────────────────────────────────────
 def fetch_notices(days_back: int, status_box) -> list[dict]:
-    since    = (datetime.now() - timedelta(days=days_back)).strftime("%Y%m%d")
-    cpv_part = " OR ".join(f'classification-cpv = "{c}"' for c in CPV_CODES)
-    kw_part  = " OR ".join(f'FT ~ "{k}"' for k in BROAD_SEARCH_TERMS)
-    query    = f"(({cpv_part}) OR ({kw_part})) AND publication-date >= {since}"
+    query = ted_core.make_query(days_back, search_terms=BROAD_SEARCH_TERMS)
+    notices, error = ted_core.paginate(
+        query, max_pages=MAX_PAGES, progress=status_box.info
+    )
+    if error:
+        status_box.warning(f"Fetch error: {error}")
+        return []
 
-    all_notices, token, page = [], None, 0
-    deadline_cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
-
-    while page < MAX_PAGES:
-        payload = {
-            "query": query, "fields": RESPONSE_FIELDS,
-            "limit": PAGE_SIZE, "scope": "ACTIVE",
-            "checkQuerySyntax": False,
-            "paginationMode": "ITERATION",
-            "onlyLatestVersions": True,
-        }
-        if token: payload["iterationNextToken"] = token
-        for attempt in range(3):
-            try:
-                r = requests.post(SEARCH_URL, json=payload, timeout=60)
-            except Exception as e:
-                status_box.warning(f"Fetch error: {e}"); return []
-            if r.status_code == 200:
-                d       = r.json()
-                notices = d.get("notices", [])
-                token   = d.get("iterationNextToken")
-                all_notices.extend(notices)
-                page += 1
-                status_box.info(f"Fetched {len(all_notices):,} notices so far...")
-                break
-            elif r.status_code == 429:
-                time.sleep(35 * (attempt + 1))
-            else:
-                status_box.warning(f"API error {r.status_code}"); return []
-        if not token: break
-
-    # Extract and filter
+    cutoff = datetime.now(UTC) - timedelta(hours=24)
     rows = []
-    english_countries = {"IRL", "GBR", "MLT", "CYP"}
-    for raw in all_notices:
-        e     = extract(raw)
-        langs = e.get("languages", "").upper()
-        if langs and "ENG" not in langs and "NLD" not in langs:
-            if e.get("country", "") not in english_countries:
-                continue
-        # Skip expired open tenders (keep intel/awarded always)
-        if e["notice_type"] not in INTEL_TYPES:
-            dt = e["deadline_dt"]
-            if dt and dt < deadline_cutoff:
-                continue
+    for raw in notices:
+        e = ted_core.extract(raw, desc_limit=2000, include_winner=False)
+        if not ted_core.passes_language(e):
+            continue
+        if ted_core.is_expired_open(e, skip_intel_deadline=True, cutoff=cutoff):
+            continue
         rows.append({k: v for k, v in e.items() if k != "deadline_dt"})
-
     return rows
 
 
@@ -318,9 +182,9 @@ def load_eit_tenders() -> pd.DataFrame:
         df = df[df["fit"].isin(["YES", "MAYBE"])].copy()
 
         # Drop rows where deadline has clearly passed
-        today_str = datetime.now().strftime("%Y-%m-%d")
         def is_expired(dl):
-            if not dl or pd.isna(dl): return False  # no deadline = keep
+            if not dl or pd.isna(dl):
+                return False  # no deadline = keep
             dl = str(dl).strip()
             # try ISO format first
             try:
@@ -362,10 +226,8 @@ def ai_filter_eit(eit_df: pd.DataFrame, company_profile: str,
 
     with ThreadPoolExecutor(max_workers=AI_WORKERS) as pool:
         futures = {pool.submit(check_one, r): i for i, r in enumerate(rows)}
-        done = 0
-        for fut in as_completed(futures):
-            res   = fut.result()
-            done += 1
+        for done, fut in enumerate(as_completed(futures), start=1):
+            res = fut.result()
             progress_bar.progress(done / len(rows),
                                   text=f"Checking EIT tenders {done}/{len(rows)}...")
             if res["relevant"]:
@@ -386,10 +248,8 @@ def ai_filter(rows: list[dict], company_profile: str,
 
     with ThreadPoolExecutor(max_workers=AI_WORKERS) as pool:
         futures = {pool.submit(check_one, r): i for i, r in enumerate(rows)}
-        done = 0
-        for fut in as_completed(futures):
-            res   = fut.result()
-            done += 1
+        for done, fut in enumerate(as_completed(futures), start=1):
+            res = fut.result()
             progress_bar.progress(done / len(rows), text=f"AI checking {done}/{len(rows)}...")
             if res["relevant"]:
                 results.append(res)

@@ -9,6 +9,7 @@ from unittest import mock
 
 import pytest
 
+import ted_core
 from _golden_util import df_records
 from conftest import load_fixture, load_golden
 
@@ -21,8 +22,8 @@ def test_fetch_filter_split_matches_golden(mod_name):
     notices = load_fixture("ted_notices.json")
     golden = load_golden(f"{mod_name}_fetch.json")
 
-    with mock.patch.object(mod, "_fetch_page",
-                           return_value=(notices, None, None, len(notices))):
+    # Inject fixtures at the pagination seam; the filter/split logic runs for real.
+    with mock.patch.object(ted_core, "paginate", return_value=(notices, None)):
         live, intel = mod.fetch(days_back=1)
 
     assert df_records(live) == golden["live"]

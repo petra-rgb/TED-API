@@ -30,6 +30,7 @@ from _golden_util import df_records, norm_extract  # noqa: E402
 
 def main() -> None:
     notices = json.loads((FIX / "ted_notices.json").read_text())
+    import ted_core
 
     for mod_name in ("ted_intelligence_ai", "ted_intelligence"):
         mod = __import__(mod_name)
@@ -39,9 +40,7 @@ def main() -> None:
             json.dumps(extract_golden, indent=2, ensure_ascii=False, sort_keys=True) + "\n"
         )
 
-        with mock.patch.object(
-            mod, "_fetch_page", return_value=(notices, None, None, len(notices))
-        ):
+        with mock.patch.object(ted_core, "paginate", return_value=(notices, None)):
             live, intel = mod.fetch(days_back=1)
         fetch_golden = {"live": df_records(live), "intel": df_records(intel)}
         (GOLD / f"{mod_name}_fetch.json").write_text(
