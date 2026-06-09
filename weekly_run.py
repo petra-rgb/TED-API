@@ -14,16 +14,18 @@ From command line:
     python weekly_run.py sk-ant-...      # pass key as argument
 """
 
+import calendar
 import importlib
 import os
 import re
-import calendar
-import pandas as pd
-from datetime import datetime, timezone, date as _date
+from datetime import UTC, datetime
+from datetime import date as _date
 from pathlib import Path
 
-import scraper
+import pandas as pd
+
 import evaluate
+import scraper
 
 importlib.reload(scraper)
 importlib.reload(evaluate)
@@ -69,7 +71,7 @@ def _smart_parse(text) -> "_date | None":
 
 def _is_expired(row: dict) -> bool:
     """Return True if the tender has a confirmed past deadline."""
-    today = datetime.now(timezone.utc).date()
+    today = datetime.now(UTC).date()
     for col in ("deadline", "call_deadline"):
         val = str(row.get(col, "") or "").strip()
         if val and val != "nan":
@@ -109,13 +111,13 @@ def _seed_if_needed():
 
 
 # ── Main weekly runner ────────────────────────────────────────────────────────
-def run(api_key: str = None, verbose: bool = True) -> list[dict]:
+def run(api_key: str | None = None, verbose: bool = True) -> list[dict]:
     """
     Run the weekly pipeline.
     Returns the list of newly evaluated tender dicts (empty if no new tenders).
     """
     _seed_if_needed()
-    run_time = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    run_time = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
 
     # ── 1. Scrape all sites ───────────────────────────────────────────────────
     if verbose:
@@ -273,4 +275,4 @@ if __name__ == "__main__":
     # Notify Slack about new YES/MAYBE tenders
     relevant = [r for r in results if r.get("fit") in ("YES", "MAYBE")]
     if relevant:
-        notify_slack(slack_url, relevant, datetime.now(timezone.utc).strftime("%Y-%m-%d"))
+        notify_slack(slack_url, relevant, datetime.now(UTC).strftime("%Y-%m-%d"))

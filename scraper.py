@@ -31,9 +31,8 @@ import hashlib
 import json
 import re
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, date, datetime
 from pathlib import Path
-from typing import Optional
 
 import requests
 from bs4 import BeautifulSoup
@@ -110,7 +109,7 @@ SITES = [
 # HELPERS
 # ─────────────────────────────────────────────────────────────────────────────
 
-def fetch(url: str) -> Optional[BeautifulSoup]:
+def fetch(url: str) -> BeautifulSoup | None:
     """Fetch a URL and return a BeautifulSoup tree, or None on error."""
     try:
         resp = requests.get(url, headers=HEADERS, timeout=REQUEST_TIMEOUT)
@@ -136,7 +135,7 @@ def make_tender(
         "url": url,
         "deadline": deadline.strip(),
         "description": description.strip(),
-        "scraped_at": datetime.now(timezone.utc).isoformat(),
+        "scraped_at": datetime.now(UTC).isoformat(),
     }
 
 
@@ -221,7 +220,7 @@ def _extract_submission_deadline(text: str) -> str:
     )
     if m:
         day, month = m.group(1), m.group(2)
-        year = m.group(3) or str(datetime.now(timezone.utc).year)
+        year = m.group(3) or str(datetime.now(UTC).year)
         return f"{day} {month} {year}"
 
     return ""
@@ -824,7 +823,7 @@ SCRAPERS: dict = {
 }
 
 
-def run_all(site_filter: Optional[str] = None) -> list[dict]:
+def run_all(site_filter: str | None = None) -> list[dict]:
     all_tenders = []
     for site in SITES:
         if site_filter and site["id"] != site_filter:
@@ -884,21 +883,20 @@ _DATE_PATTERNS = [
 ]
 
 
-def parse_deadline(text: str) -> Optional["date"]:
+def parse_deadline(text: str) -> date | None:
     """
     Extract and parse the first recognisable date from a deadline string.
     Returns a datetime.date, or None if no date can be parsed.
     Handles: DD.MM.YYYY, YYYY-MM-DD, "May 15, 2026", "15 May 2026",
              ordinals like "June 7th, 2026" or "22nd March 2026", etc.
     """
-    from datetime import date as _date
     if not text:
         return None
     # Strip ordinal suffixes so "7th" → "7", "1st" → "1", "22nd" → "22", etc.
     text = re.sub(r"\b(\d{1,2})(st|nd|rd|th)\b", r"\1", text, flags=re.IGNORECASE)
     # Inject current year into year-less dates in deadline context:
     # "until 15 of March" / "by 20 May" / "is 26 May" → adds current year
-    _cur_year = datetime.now(timezone.utc).year
+    _cur_year = datetime.now(UTC).year
     def _inject_year(m: "re.Match") -> str:
         day, month, year = m.group(1), m.group(2), m.group(3)
         return f"{day} {month} {year if year else _cur_year}"
@@ -911,9 +909,7 @@ def parse_deadline(text: str) -> Optional["date"]:
         m = pattern.search(text)
         if m:
             # Reconstruct a normalised string for strptime
-            if "%B" in fmt and fmt.startswith("%B"):          # Month DD YYYY
-                candidate = f"{m.group(1)} {m.group(2)} {m.group(3)}"
-            elif "%B" in fmt:                                   # DD Month YYYY
+            if ("%B" in fmt and fmt.startswith("%B")) or "%B" in fmt:          # Month DD YYYY
                 candidate = f"{m.group(1)} {m.group(2)} {m.group(3)}"
             else:
                 candidate = m.group(0)
@@ -933,7 +929,7 @@ _CLOSED_KEYWORDS = {
 
 def filter_expired(
     tenders: list[dict],
-    today: Optional["date"] = None,
+    today: date | None = None,
 ) -> list[dict]:
     """
     Remove tenders that are clearly closed or expired. Two checks:
@@ -945,9 +941,8 @@ def filter_expired(
     Tenders with no deadline and no closing keywords are kept
     (we can't prove they're closed).
     """
-    from datetime import date as _date
     if today is None:
-        today = datetime.now(timezone.utc).date()
+        today = datetime.now(UTC).date()
 
     kept, dropped = [], 0
     for t in tenders:
@@ -1059,7 +1054,7 @@ def main() -> None:
     if args.mark_seen or args.new_only:
         save_seen([t["id"] for t in tenders])
 
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today = datetime.now(UTC).strftime("%Y-%m-%d")
 
     if args.output == "json":
         save_json(tenders, OUTPUT_DIR / f"tenders_{today}.json")

@@ -85,6 +85,7 @@ def _extract_pdf_text(raw_bytes: bytes) -> str:
     """
     try:
         import io
+
         from pdfminer.high_level import extract_text as _pdf_extract
         raw = _pdf_extract(io.BytesIO(raw_bytes)) or ""
         text = re.sub(r"\s{2,}", " ", raw).strip()
@@ -222,7 +223,8 @@ def evaluate_tender(client: "anthropic.Anthropic", tender: dict) -> dict:
         result["call_summary"] = str(data.get("summary", ""))
         # Use Claude-extracted deadline only when the scraper found nothing
         claude_dl = str(data.get("deadline", "")).strip()
-        result["call_deadline"] = claude_dl if (claude_dl and not result.get("deadline")) else result.get("deadline", "")
+        scraper_dl = result.get("deadline", "")
+        result["call_deadline"] = claude_dl if (claude_dl and not scraper_dl) else scraper_dl
     except json.JSONDecodeError:
         result["fit"] = "ERROR"
         result["fit_reason"] = f"Claude returned non-JSON: {raw[:120]}"
@@ -262,8 +264,7 @@ def evaluate_all(
             pool.submit(evaluate_tender, client, t): i
             for i, t in enumerate(tenders)
         }
-        done = 0
-        for future in as_completed(future_to_idx):
+        for done, future in enumerate(as_completed(future_to_idx), start=1):
             idx = future_to_idx[future]
             try:
                 results[idx] = future.result()
@@ -273,7 +274,6 @@ def evaluate_all(
                     "fit": "ERROR", "score": 0,
                     "fit_reason": str(e), "fit_match": "",
                 }
-            done += 1
             if verbose:
                 t = results[idx]
                 dl = t.get("call_deadline") or ""
