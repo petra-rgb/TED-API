@@ -149,7 +149,8 @@ def prep(df: pd.DataFrame) -> pd.DataFrame:
         lambda x: (x[:160] + "…") if len(x) > 160 else x
     )
     df["_ord"] = df["fit"].map(FIT_ORDER).fillna(3)
-    return df.sort_values(["_ord", "score"], ascending=[True, False]).drop(columns=["_ord"]).reset_index(drop=True)
+    return (df.sort_values(["_ord", "score"], ascending=[True, False])
+            .drop(columns=["_ord"]).reset_index(drop=True))
 
 
 def apply_filters(df: pd.DataFrame) -> pd.DataFrame:
@@ -200,7 +201,8 @@ def show_full_analysis(df: pd.DataFrame):
             reason   = str(r.get("fit_reason", "") or "")
             match_sv = str(r.get("fit_match", "") or "")
             if summary and summary != "nan":
-                st.markdown(f"**{r.get('fit_badge', '')} &nbsp; {r.get('score', 0)}/10 — [{r['title']}]({r.get('url', '#')})**")
+                st.markdown(f"**{r.get('fit_badge', '')} &nbsp; {r.get('score', 0)}/10 — "
+                            f"[{r['title']}]({r.get('url', '#')})**")
                 st.write(summary)
                 if reason and reason != "nan":
                     st.caption(f"Fit: {reason}")

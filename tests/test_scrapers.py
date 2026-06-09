@@ -5,10 +5,10 @@ decomposition can be proven behaviour-preserving. Network (scraper.fetch / reque
 is stubbed to serve the synthetic pages in scraper_cases.py.
 """
 import pytest
-
-import scraper
 import scraper_cases as sc
 from conftest import load_golden
+
+import scraper
 
 SCRAPER_KEYS = list(sc.SITES.keys())
 

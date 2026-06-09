@@ -26,7 +26,7 @@ def test_ask_claude_parses_yes(monkeypatch):
         text = "RELEVANT: YES\nREASON: strong commercialisation fit"
 
     class _Resp:
-        content = [_Block()]
+        content = [_Block()]  # noqa: RUF012  (test stub, not real mutable state)
 
     class _Client:
         class messages:

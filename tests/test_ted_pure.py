@@ -7,7 +7,6 @@ re-export the same names).
 import datetime as dt
 
 import pytest
-
 from _golden_util import norm_extract
 from conftest import load_fixture, load_golden
 
@@ -41,7 +40,7 @@ def test_parse_deadline(mod_name):
     assert parse(None) is None
     assert parse("") is None
     assert parse("not a date") is None
-    assert parse("2026-05-15") == dt.datetime(2026, 5, 15, tzinfo=dt.timezone.utc)
+    assert parse("2026-05-15") == dt.datetime(2026, 5, 15, tzinfo=dt.UTC)
     assert parse(["2026-05-15", "ignored"]).year == 2026
     iso = parse("2026-05-15T12:30:00+00:00")
     assert (iso.year, iso.month, iso.day, iso.hour) == (2026, 5, 15, 12)

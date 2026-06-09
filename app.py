@@ -99,7 +99,8 @@ ted_open = ted_planning = ted_urgent = ted_ai = 0
 urgent_rows = pd.DataFrame()
 
 if not df_ted.empty:
-    ted_last_run = df_ted["fetched_date"].max().strftime("%d %b %Y") if df_ted["fetched_date"].notna().any() else "—"
+    ted_last_run = (df_ted["fetched_date"].max().strftime("%d %b %Y")
+                    if df_ted["fetched_date"].notna().any() else "—")
 
     live        = df_ted[df_ted["bucket"].isin(["Live opportunity", "Possible opportunity"])]
     kw_planning = live[live["deadline"] == "—"]
@@ -195,7 +196,8 @@ if not df_eit.empty:
     ].sort_values("_dl_ts")
 
 if not df_eit_new.empty:
-    eit_new = len(df_eit_new[df_eit_new["fit"].isin(["YES", "MAYBE"])]) if "fit" in df_eit_new.columns else len(df_eit_new)
+    eit_new = (len(df_eit_new[df_eit_new["fit"].isin(["YES", "MAYBE"])])
+               if "fit" in df_eit_new.columns else len(df_eit_new))
 
 
 # ── Page header ───────────────────────────────────────────────────────────────
@@ -249,7 +251,8 @@ if not urgent_rows.empty:
         col_a, col_b = st.columns([5, 1])
         with col_a:
             st.markdown(f"**[{str(r['title'])[:85]}]({r.get('link', '#')})**  \n"
-                        f"<small>{r.get('buyer', '')} &nbsp;·&nbsp; deadline **{r['deadline']}** &nbsp;·&nbsp; {delta_str}</small>",
+                        f"<small>{r.get('buyer', '')} &nbsp;·&nbsp; deadline "
+                        f"**{r['deadline']}** &nbsp;·&nbsp; {delta_str}</small>",
                         unsafe_allow_html=True)
         with col_b:
             score = int(r.get("score", 0))
@@ -263,7 +266,7 @@ if not eit_urgent_rows.empty:
     for _, r in eit_urgent_rows.iterrows():
         days_left = (r["_dl_ts"] - today_ts).days
         fit  = str(r.get("fit", ""))
-        badge = "" if fit == "YES" else ("" if fit == "MAYBE" else "")
+        badge = ""
         col_a, col_b = st.columns([5, 1])
         with col_a:
             st.markdown(
@@ -288,7 +291,8 @@ if not df_eit.empty and eit_yes > 0 and "fit" in df_eit.columns:
             deadline = "deadline unknown"
         st.markdown(
             f"**[{str(r['title'])[:85]}]({r.get('url', '#')})**  \n"
-            f"<small>{r.get('source', '')} &nbsp;·&nbsp;  {deadline} &nbsp;·&nbsp; score {r.get('score', 0)}/10</small>",
+            f"<small>{r.get('source', '')} &nbsp;·&nbsp;  {deadline} &nbsp;·&nbsp; "
+            f"score {r.get('score', 0)}/10</small>",
             unsafe_allow_html=True,
         )
         if r.get("call_summary") and str(r.get("call_summary")) != "nan":

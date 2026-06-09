@@ -53,9 +53,9 @@ def main() -> None:
 
 
 def _generate_scraper_goldens() -> None:
-    import scraper
-
     import scraper_cases as sc
+
+    import scraper
 
     out = {}
     for key, site in sc.SITES.items():

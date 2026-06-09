@@ -8,10 +8,10 @@ by ted_intelligence_ai. The goldens lock that exact divergence.
 from unittest import mock
 
 import pytest
-
-import ted_core
 from _golden_util import df_records
 from conftest import load_fixture, load_golden
+
+import ted_core
 
 MODULES = ["ted_intelligence_ai", "ted_intelligence"]
 

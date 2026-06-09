@@ -140,8 +140,10 @@ if not ai_closed_all.empty:
 else:
     all_closed = closed.copy()
 
-all_planning = pd.concat([planning, ai_planning]).drop_duplicates(subset=["pub_num"]) if not ai_planning.empty else planning
-all_open     = pd.concat([open_, ai_open_]).drop_duplicates(subset=["pub_num"]) if not ai_open_.empty else open_
+all_planning = (pd.concat([planning, ai_planning]).drop_duplicates(subset=["pub_num"])
+                if not ai_planning.empty else planning)
+all_open     = (pd.concat([open_, ai_open_]).drop_duplicates(subset=["pub_num"])
+                if not ai_open_.empty else open_)
 
 all_open_active = all_open[
     (all_open["deadline"] == "—") | (all_open["deadline"] >= today)
@@ -202,7 +204,8 @@ if "deadline" in open_.columns:
         st.warning(f"{len(urgent)} opportunity/ies with deadline within {WARN_DAYS} days")
         for _, r in urgent.iterrows():
             is_ai        = r.get("source") == "ai"
-            status_badge = f" · *{reviews.get(str(r['pub_num']), '')}*" if str(r["pub_num"]) in reviews else ""
+            status_badge = (f" · *{reviews.get(str(r['pub_num']), '')}*"
+                            if str(r["pub_num"]) in reviews else "")
             score_str    = f" | score {int(r['score'])}" if "score" in r and pd.notna(r.get("score")) else ""
             ai_badge     = " · *AI verified*" if is_ai else ""
             st.markdown(
@@ -223,11 +226,11 @@ with st.sidebar:
         df_ai["country"] if not df_ai.empty and "country" in df_ai.columns else pd.Series(),
     ]).dropna().replace("", pd.NA).dropna().unique().tolist()
 
-    country_filt = st.selectbox("Country", ["All"] + sorted(all_countries))
+    country_filt = st.selectbox("Country", ["All", *sorted(all_countries)])
 
-    date_opts = ["All time"] + sorted(
+    date_opts = ["All time", *sorted(
         df["fetched_date"].dt.date.astype(str).unique().tolist(), reverse=True
-    )
+    )]
     date_filt     = st.selectbox("Fetched on", date_opts)
     sort_by       = st.selectbox("Sort by", ["Score (high to low)", "Newest fetch", "Deadline"])
     hide_reviewed = st.toggle("Hide reviewed", value=False)
@@ -325,7 +328,7 @@ def show_copy_brief(view: pd.DataFrame, key: str):
         return
     st.divider()
     st.caption("Copy tender brief")
-    titles   = ["— select a notice —"] + view["title"].astype(str).tolist()
+    titles   = ["— select a notice —", *view["title"].astype(str).tolist()]
     selected = st.selectbox("", titles, key=f"copy_select_{key}", label_visibility="collapsed")
     if selected == "— select a notice —":
         return
@@ -415,7 +418,8 @@ def show_reviewed_table(view: pd.DataFrame, tab_key: str):
         prep_description(view)[display_cols].reset_index(drop=True),
         column_config={
             "in_review": st.column_config.CheckboxColumn("Keep", default=True, width="small"),
-            "status":    st.column_config.SelectboxColumn("Status", options=STATUS_OPTIONS, default="Reviewed", width="medium"),
+            "status":    st.column_config.SelectboxColumn(
+                "Status", options=STATUS_OPTIONS, default="Reviewed", width="medium"),
             "notes":     st.column_config.TextColumn("Notes", width="large"),
             "link":      st.column_config.LinkColumn("Link", display_text="View"),
             "score":     st.column_config.NumberColumn("Score", format="%d"),
@@ -469,7 +473,8 @@ with tab1:
 
     col_a, col_b = st.columns([3, 1])
     with col_a:
-        st.caption(f"Showing **{len(view)}** of {len(combined_planning)} planning notices — no deadline set{overlap_note}{ai_note}")
+        st.caption(f"Showing **{len(view)}** of {len(combined_planning)} planning notices "
+                   f"— no deadline set{overlap_note}{ai_note}")
     with col_b:
         if not view.empty:
             st.download_button("Download CSV",
@@ -507,7 +512,8 @@ with tab2:
 
     col_a, col_b = st.columns([3, 1])
     with col_a:
-        st.caption(f"Showing **{len(view)}** of {len(combined_open)} open opportunities{overlap_note}{ai_note}")
+        st.caption(f"Showing **{len(view)}** of {len(combined_open)} open "
+                   f"opportunities{overlap_note}{ai_note}")
     with col_b:
         if not view.empty:
             st.download_button("Download CSV",
