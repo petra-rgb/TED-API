@@ -1,0 +1,34 @@
+name: Code quality
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dev dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Lint (ruff)
+        run: ruff check .
+
+      - name: Cyclomatic complexity gate (max 15)
+        run: |
+          radon cc -s --total-average *.py pages/*.py | tee cc.txt
+          if grep -Eq '\((1[6-9]|[2-9][0-9]+)\)' cc.txt; then
+            echo "::error::Found function(s) with cyclomatic complexity > 15"
+            exit 1
+          fi
+
+      - name: Tests
+        run: pytest -q

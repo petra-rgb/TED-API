@@ -1,10 +1,9 @@
-requests>=2.31.0
-pandas>=2.0.0
-openpyxl>=3.1.0
-streamlit>=1.35.0
-supabase
+anthropic>=0.40.0
 beautifulsoup4>=4.12.0
 lxml>=5.0.0
-anthropic>=0.25.0
+openpyxl>=3.1.0
+pandas>=2.0.0
 pdfminer.six>=20221105
 requests>=2.31.0
+streamlit>=1.35.0
+supabase>=2.0.0
