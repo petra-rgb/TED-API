@@ -22,12 +22,19 @@ def test_ask_claude_no_key_keeps():
 
 
 def test_ask_claude_parses_yes(monkeypatch):
-    class _R:
-        status_code = 200
-        def json(self):
-            return {"content": [{"text": "RELEVANT: YES\nREASON: strong commercialisation fit"}]}
+    class _Block:
+        text = "RELEVANT: YES\nREASON: strong commercialisation fit"
 
-    monkeypatch.setattr(ted_core.requests, "post", lambda *a, **k: _R())
+    class _Resp:
+        content = [_Block()]
+
+    class _Client:
+        class messages:
+            @staticmethod
+            def create(**kw):
+                return _Resp()
+
+    monkeypatch.setattr(ted_core, "claude_client", lambda key: _Client())
     rel, reason = ted_core._ask_claude("profile", "t", "b", "x", api_key="sk-test")
     assert rel is True
     assert reason == "strong commercialisation fit"

@@ -6,12 +6,11 @@ gets AI-filtered EU tenders on screen + CSV download.
 
 import os
 import sys
-import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import UTC, datetime, timedelta
 
+import anthropic
 import pandas as pd
-import requests
 import streamlit as st
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -87,7 +86,6 @@ if not st.session_state.authenticated:
 # ─────────────────────────────────────────────────────────────
 # TED FETCH CONSTANTS  (shared logic lives in ted_core)
 # ─────────────────────────────────────────────────────────────
-CLAUDE_URL   = "https://api.anthropic.com/v1/messages"
 CLAUDE_MODEL = "claude-haiku-4-5"
 MAX_PAGES    = 20        # cap pages to keep runtime reasonable
 AI_WORKERS   = 3
@@ -133,44 +131,36 @@ def fetch_notices(days_back: int, status_box) -> list[dict]:
 # ─────────────────────────────────────────────────────────────
 def _ask_claude(api_key: str, company_profile: str, title: str,
                 buyer: str, description: str) -> tuple[bool, str]:
-    prompt = f"""You are evaluating whether a public EU procurement tender is relevant for this company.
+    """Relevance check against the client's own profile (Claude SDK; keeps on error).
 
-COMPANY PROFILE:
-{company_profile}
-
-TENDER:
-Title: {title}
-Buyer: {buyer}
-Description: {description or "(not available)"}
-
-Is this tender genuinely relevant for this company?
-Answer in exactly this format:
-RELEVANT: YES or NO
-REASON: one sentence"""
-
-    for attempt in range(3):
-        try:
-            r = requests.post(
-                CLAUDE_URL,
-                headers={"x-api-key": api_key, "anthropic-version": "2023-06-01",
-                         "content-type": "application/json"},
-                json={"model": CLAUDE_MODEL, "max_tokens": 100,
-                      "messages": [{"role": "user", "content": prompt}]},
-                timeout=30,
-            )
-            if r.status_code == 200:
-                text     = r.json()["content"][0]["text"].strip()
-                relevant = "RELEVANT: YES" in text.upper()
-                reason   = next((l[7:].strip() for l in text.split("\n")
-                                 if l.upper().startswith("REASON:")), "")
-                return relevant, reason
-            elif r.status_code == 429:
-                time.sleep(30 * (attempt + 1))
-            else:
-                return True, f"API error {r.status_code} — kept"
-        except Exception as e:
-            return True, f"Error: {e} — kept"
-    return True, "Max retries — kept"
+    The company profile is the stable, cached prefix; the per-tender data varies.
+    """
+    system = [{
+        "type": "text",
+        "text": ("You are evaluating whether a public EU procurement tender is relevant "
+                 f"for this company.\n\nCOMPANY PROFILE:\n{company_profile}\n\n"
+                 "Answer in exactly this format:\nRELEVANT: YES or NO\nREASON: one sentence"),
+        "cache_control": {"type": "ephemeral"},
+    }]
+    user = (f"TENDER:\nTitle: {title}\nBuyer: {buyer}\n"
+            f"Description: {description or '(not available)'}\n\n"
+            "Is this tender genuinely relevant for this company?")
+    try:
+        resp = ted_core.claude_client(api_key).messages.create(
+            model=CLAUDE_MODEL, max_tokens=100, system=system,
+            messages=[{"role": "user", "content": user}],
+        )
+        text = resp.content[0].text.strip()
+        relevant = "RELEVANT: YES" in text.upper()
+        reason = next((line[7:].strip() for line in text.split("\n")
+                       if line.upper().startswith("REASON:")), "")
+        return relevant, reason
+    except anthropic.RateLimitError:
+        return True, "Max retries — kept"
+    except anthropic.APIStatusError as e:
+        return True, f"API error {e.status_code} — kept"
+    except Exception as e:
+        return True, f"Error: {e} — kept"
 
 
 def load_eit_tenders() -> pd.DataFrame:

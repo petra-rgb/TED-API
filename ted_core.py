@@ -23,6 +23,7 @@ from collections.abc import Callable, Iterable, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import UTC, datetime, timedelta
 
+import anthropic
 import pandas as pd
 import requests
 
@@ -36,7 +37,6 @@ TODAY = datetime.now(UTC)
 DEADLINE_CUTOFF = TODAY - timedelta(hours=24)
 
 SEARCH_URL = "https://api.ted.europa.eu/v3/notices/search"
-CLAUDE_URL = "https://api.anthropic.com/v1/messages"
 CLAUDE_MODEL = "claude-sonnet-4-6"
 INTEL_MODEL = "claude-haiku-4-5"
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
@@ -403,48 +403,54 @@ def fetch_ted(days_back: int = DAYS_BACK, *, skip_intel_deadline: bool,
 
 
 # ── Claude relevance filters ────────────────────────────────────────────────────
+_clients: dict[str, anthropic.Anthropic] = {}
+
+
+def claude_client(api_key: str) -> anthropic.Anthropic:
+    """A cached Anthropic SDK client per key (the SDK handles 429/5xx retries)."""
+    if api_key not in _clients:
+        _clients[api_key] = anthropic.Anthropic(api_key=api_key, max_retries=4)
+    return _clients[api_key]
+
+
+def _relevance_reason(text: str) -> tuple[bool, str]:
+    relevant = "RELEVANT: YES" in text.upper()
+    reason = next((line[7:].strip() for line in text.split("\n")
+                   if line.upper().startswith("REASON:")), "")
+    return relevant, reason
+
+
 def _ask_claude(profile: str, title: str, buyer: str, notice_text: str, *,
                 api_key: str = ANTHROPIC_API_KEY, model: str = CLAUDE_MODEL):
-    """Ask Claude whether a tender is relevant. Returns (relevant, reason)."""
+    """Ask Claude whether a tender is relevant. Returns (relevant, reason).
+
+    Keeps the tender on any API failure (never silently drops). The stable
+    instruction+profile prefix is cached, so a whole run pays for it once.
+    """
     if not api_key:
         return True, "No API key — kept"
-    prompt = f"""You are evaluating whether a public procurement tender is relevant for DevelopMinded.
-
-{profile}
-
-TENDER TITLE: {title}
-BUYER: {buyer}
-NOTICE TEXT:
-{notice_text or "(not available — judge on title and buyer only)"}
-
-Is this tender genuinely relevant for DevelopMinded?
-Answer in exactly this format:
-RELEVANT: YES or NO
-REASON: one sentence"""
-    for attempt in range(4):
-        try:
-            r = requests.post(
-                CLAUDE_URL,
-                headers={"x-api-key": api_key,
-                         "anthropic-version": "2023-06-01",
-                         "content-type": "application/json"},
-                json={"model": model, "max_tokens": 150,
-                      "messages": [{"role": "user", "content": prompt}]},
-                timeout=30,
-            )
-            if r.status_code == 200:
-                text = r.json()["content"][0]["text"].strip()
-                relevant = "RELEVANT: YES" in text.upper()
-                reason = next((line[7:].strip() for line in text.split("\n")
-                               if line.upper().startswith("REASON:")), "")
-                return relevant, reason
-            if r.status_code == 429:
-                time.sleep(30 * (attempt + 1))
-            else:
-                return True, f"API error {r.status_code} — kept"
-        except Exception as e:
-            return True, f"Error: {e} — kept"
-    return True, "Max retries (429) — kept"
+    system = [{
+        "type": "text",
+        "text": ("You are evaluating whether a public procurement tender is relevant "
+                 f"for DevelopMinded.\n\n{profile}\n\nAnswer in exactly this format:\n"
+                 "RELEVANT: YES or NO\nREASON: one sentence"),
+        "cache_control": {"type": "ephemeral"},
+    }]
+    user = (f"TENDER TITLE: {title}\nBUYER: {buyer}\nNOTICE TEXT:\n"
+            f"{notice_text or '(not available — judge on title and buyer only)'}\n\n"
+            "Is this tender genuinely relevant for DevelopMinded?")
+    try:
+        resp = claude_client(api_key).messages.create(
+            model=model, max_tokens=150, system=system,
+            messages=[{"role": "user", "content": user}],
+        )
+        return _relevance_reason(resp.content[0].text.strip())
+    except anthropic.RateLimitError:
+        return True, "Max retries (429) — kept"
+    except anthropic.APIStatusError as e:
+        return True, f"API error {e.status_code} — kept"
+    except Exception as e:
+        return True, f"Error: {e} — kept"
 
 
 def ai_filter(live: pd.DataFrame, *, profile: str, api_key: str = ANTHROPIC_API_KEY,
@@ -502,8 +508,7 @@ def ai_filter_intel(intel: pd.DataFrame, *, api_key: str = ANTHROPIC_API_KEY,
     if candidates.empty:
         return pd.DataFrame()
 
-    import anthropic
-    client = anthropic.Anthropic(api_key=api_key)
+    client = claude_client(api_key)
     results = []
     for i, (_, row) in enumerate(candidates.iterrows()):
         relevant = _intel_relevant(client, model, row, i, log)
